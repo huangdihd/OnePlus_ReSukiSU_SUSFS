@@ -740,6 +740,7 @@ runs:
         echo "$susfs_version" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
         echo "SusFS Version: $susfs_version"
 
+        cd "$COMMON_KERNEL_FOLDER"
         patch -p1 < "$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${{ env.SUSFS_KERNEL_BRANCH }}.patch"
         echo "✅ SUSFS patches applied"
         echo "::endgroup::"
