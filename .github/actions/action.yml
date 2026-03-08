@@ -784,6 +784,10 @@ runs:
             echo "vma_pages Line not found. Fake Patching!"
             fake_patched=1
           fi
+          if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+            echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
+            sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+          fi
         fi
         
         patch -p1 < "$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${{ env.SUSFS_KERNEL_BRANCH }}.patch"
