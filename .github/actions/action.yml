@@ -720,6 +720,10 @@ runs:
         cd KernelSU
         KSU_COMMIT_SHA=$(git rev-parse HEAD)
         echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
+        echo "CONFIG_KPM=y" >> common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KALLSYMS=y" >> common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KALLSYMS_ALL=y" >> common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KPROBES=y" >> common/arch/arm64/configs/gki_defconfig
         
         echo "✅ ReSukiSU added (commit: ${KSU_COMMIT_SHA:0:8})"
         echo "::endgroup::"
