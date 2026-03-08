@@ -33,7 +33,7 @@ on:
         description: 'Enter KernelSU build json'
         required: true
         type: string
-        default: '[{"type":"ksu"]'
+        default: '[{"type":"ksu"}]'
       optimize_level:
         description: "Compiler optimization level"
         required: true
