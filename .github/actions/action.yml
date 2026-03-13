@@ -503,7 +503,7 @@ runs:
         echo "::endgroup::"
     
     - name: Cache ccache
-      uses: actions/cache@v5
+      uses: actions/cache@v4
       with:
         path: ${{ env.CCACHE_DIR }}
         key: ccache-ksun-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
