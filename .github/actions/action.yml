@@ -675,7 +675,7 @@ runs:
             
             echo "❌ Failed, cleaning up..."
             rm -f "$file_name" 2>/dev/null
-            sleep $((attempt++ * 10))
+            sleep $((attempt++ * 5))
           done
           
           echo "💥 All attempts failed"
@@ -686,7 +686,15 @@ runs:
         retry_clone "https://github.com/TheWildJames/kernel_patches.git"
 
         echo "Downloading SukiSU_KernelPatch..."
-        retry_download "$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest | grep "browser_download_url" | grep "patch_linux" | cut -d '"' -f 4)" "patch_linux"
+        PATCH_URL=$(curl -sSL -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest | grep "browser_download_url" | grep "patch_linux" | cut -d '"' -f 4 | head -n 1)
+        
+        if [ -z "$PATCH_URL" ]; then
+          echo "::error::Failed to fetch the SukiSU_KernelPatch download link! The API might be rate-limited or the repository is inaccessible."
+          exit 1
+        fi
+        
+        echo "✅ Successfully fetched patch URL: $PATCH_URL"
+        retry_download "$PATCH_URL" "patch_linux"
         chmod +x patch_linux
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
