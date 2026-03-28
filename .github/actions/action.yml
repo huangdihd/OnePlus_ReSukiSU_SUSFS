@@ -1,5 +1,5 @@
-name: 'Build OnePlus Kernel with KernelSU Next'
-description: 'GitHub Action to build OnePlus kernels with optional KernelSU Next and SUSFS integration, optimized for performance and reliability'
+name: 'Build OnePlus Kernel with KernelSU / ReSukiSU'
+description: 'GitHub Action to build OnePlus kernels with original KernelSU or ReSukiSU, and SUSFS integration, optimized for performance and reliability'
 inputs:
   op_config_json:
     description: 'JSON string containing full device config'
@@ -10,8 +10,8 @@ inputs:
     required: true
     type: choice
     options:
-      - KSUN
       - KSU
+      - ReSukiSU
   ksu_branch_or_hash:
     description: 'KSU branch or commit hash (empty = auto-detect by ksu_type)'
     required: false
@@ -326,7 +326,6 @@ runs:
         KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
         SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
         KSU_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
-        KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU-Next"
         mkdir -p "$ARTIFACTS_DIR"
         
         # Save to environment for later steps
@@ -340,7 +339,6 @@ runs:
         echo "KERNEL_PATCHES_FOLDER=$KERNEL_PATCHES_DIR" >> "$GITHUB_ENV"
         echo "SUSFS_FOLDER=$SUSFS_DIR" >> "$GITHUB_ENV"
         echo "KSU_FOLDER=$KSU_DIR" >> "$GITHUB_ENV"
-        echo "KSUN_FOLDER=$KSUN_DIR" >> "$GITHUB_ENV"
 
     - name: Get Kernel Version Info
       shell: bash
@@ -508,10 +506,10 @@ runs:
       uses: actions/cache@v5
       with:
         path: ${{ env.CCACHE_DIR }}
-        key: ccache-ksun-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        key: ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         restore-keys: |
-          ccache-ksun-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
-          ccache-ksun-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
+          ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
+          ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
    
     - name: Configure ccache
       shell: bash
@@ -738,8 +736,50 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         df -h
 
+    - name: Add KernelSU
+      shell: bash
+      if: ${{ inputs.ksu_type == 'KSU' }}
+      run: |
+        set -euo pipefail
+        echo "::group::Add KernelSU"
+        cd "$KERNEL_PLATFORM_FOLDER"
+        echo "Adding KernelSU..."
+        
+        if [ "${{ inputs.ksu_branch_or_hash }}" = "" ]; then
+          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        else
+          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "${{ inputs.ksu_branch_or_hash }}"
+        fi
+        
+        git submodule update --init --recursive
+        cd KernelSU/kernel
+        BASE_VERSION=20000
+        KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
+        sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" Makefile
+        
+        sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        
+        echo "NEED_HOOKS=false" >> $GITHUB_ENV
+        
+        cd ..
+        KSU_COMMIT_SHA=$(git rev-parse HEAD)
+        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
+        
+        echo "Add KSU Configuration Settings"
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        CONFIG_KSU=y
+        EOF
+        
+        echo "KSU" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KernelSU Version: $KSU_VERSION"
+        echo "✅ KernelSU added (commit: ${KSU_COMMIT_SHA:0:8})"
+        echo "::endgroup::"
+
     - name: Add ReSukiSU (The Sukisaku Project)
       shell: bash
+      if: ${{ inputs.ksu_type == 'ReSukiSU' }}
       run: |
         set -euo pipefail
         echo "::group::Add ReSukiSU"
@@ -793,8 +833,38 @@ runs:
         echo "SUSVER=$susfs_version" >> $GITHUB_ENV
         echo "$susfs_version" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
         echo "SusFS Version: $susfs_version"
+        
+        # Function to compare semantic versions
+        version_lte() {
+          [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$1" ]
+        }
+        
+        if version_lte "${susfs_version:1}" "1.5.12"; then
+          echo "NEED_HOOKS=true" >> $GITHUB_ENV
+        else
+          echo "NEED_HOOKS=false" >> $GITHUB_ENV
+        fi
+        
+        case "$susfs_version" in
+          "v1.5.8")
+            cd "$KSU_FOLDER"
+            patch -p1 --forward --fuzz=3 < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+            ;;
+          "v1.5.9"|"v1.5.10"|"v1.5.11"|"v1.5.12")
+            cd "$KSU_FOLDER"
+            patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+            ;;
+          "v2.0.0"|"v2.1.0")
+            cd "$KSU_FOLDER"
+            patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+            ;;
+          *)
+            echo "::error::Unsupported SUSFS version: $susfs_version"
+            exit 1
+            ;;
+        esac
+        
         cd "$COMMON_KERNEL_FOLDER"
-
         if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
           if ! grep -qxF '#include <trace/hooks/fs.h>' ./fs/namespace.c; then
             sed -i '/#include <trace\/hooks\/blk.h>/a #include <trace\/hooks\/fs.h>' ./fs/namespace.c
@@ -806,7 +876,7 @@ runs:
         if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
           if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
             echo "nr_subpages Line not found. Fake Patching!"
-            sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+            sed -i -e '/int ret = 0, copied = 0;/a \	unsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \	pagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
             fake_patched=1
           fi
           if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
@@ -912,14 +982,6 @@ runs:
           patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/experimental/bbg/bbg_fix_get_link.patch"
         fi
         
-        # if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-          # cd ./KernelSU-Next
-        # else
-          # cd ./KernelSU
-        # fi
-        
-        # echo "Patching BBG Enhanced Security!"
-        # patch -p1 --forward < "../../../kernel_patches/common/bbg_untrusted_cred.patch"
         echo "✅ BBG LSM added"
         echo "::endgroup::"
 
@@ -1388,8 +1450,6 @@ runs:
         echo "Image: $(numfmt --to=iec-i --suffix=B "$IMG_SIZE")"
 
         echo "Patching Image to add KPM support..."
-
-
         
         if [ "${{ inputs.clean }}" != "true" ]; then
           echo ""
@@ -1583,9 +1643,9 @@ runs:
           echo "Kernel Uname: ${{ env.KERNEL_UNAME }}"
           echo "Build User: ${{ env.BUILD_USER }}"
           echo "Build Host: ${{ env.BUILD_HOST }}"
-          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "KSUN Version: ${KSUVER:-unknown}"
-            echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
+          if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
+            echo "ReSukiSU Version: ${KSUVER:-unknown}"
+            echo "ReSukiSU commit SHA: ${KSU_SHA:-unknown}"
           else
             echo "KSU Version: ${KSUVER:-unknown}"
             echo "KSU commit SHA: ${KSU_SHA:-unknown}"
@@ -1630,15 +1690,16 @@ runs:
           echo "| **Kernel Uname** | \`${{ env.KERNEL_UNAME }}\` |"
           echo "| **Build User** | ${{ env.BUILD_USER }} |"
           echo "| **Build Host** | ${{ env.BUILD_HOST }} |"
-          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "| **KSUN Version** | ${KSUVER:-unknown} |"
+          
+          if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
+            echo "| **ReSukiSU Version** | ${KSUVER:-unknown} |"
           else
             echo "| **KSU Version** | ${KSUVER:-unknown} |"
           fi
           
           if [ "$KSU_SHA" != "unknown" ]; then
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/KernelSU-Next/KernelSU-Next/commit/$KSU_SHA) |"
+            if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
+              echo "| **ReSukiSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/ReSukiSU/ReSukiSU/commit/$KSU_SHA) |"
             else
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
