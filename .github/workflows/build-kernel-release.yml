@@ -845,44 +845,69 @@ jobs:
             exit 0
           fi
           
-          # Initialize the rich text message
-          MSG_TEXT="🚀 <b>OnePlus Kernel Build Successful!</b>%0A"
-          MSG_TEXT+="━━━━━━━━━━━━━━━━━━%0A"
-          MSG_TEXT+="<b>🏷️ Release Tag:</b> <code>${{ env.NEW_TAG }}</code>%0A"
-          MSG_TEXT+="<b>🔐 Root Solution:</b> ${{ inputs.ksu_type }}%0A"
-          MSG_TEXT+="<b>🛡️ SUSFS Version:</b> ${{ env.SUSFS_BASE_VERSION }}%0A"
-          MSG_TEXT+="<b>⚙️ Optimization:</b> ${{ inputs.optimize_level }} | Clean: ${{ inputs.clean_build }}%0A"
-          MSG_TEXT+="━━━━━━━━━━━━━━━━━━%0A"
-          MSG_TEXT+="<b>📦 Device Builds & Downloads:</b>%0A%0A"
+          echo "Aggregating artifact statistics..."
           
-          # Loop through artifacts to generate clean device-specific links
-          for zip in ./downloaded-artifacts/*.zip; do
-            if [ -f "$zip" ]; then
-              filename=$(basename "$zip")
-              
-              # Extract Model and OS from filename (e.g., AK3_OP12_OOS15_...)
-              rest="${filename#AK3_}"
-              IFS='_' read -ra parts <<< "$rest"
-              model="${parts[0]}"
-              os_version="${parts[1]}"
-              
-              dl_link="https://github.com/${{ github.repository }}/releases/download/${{ env.NEW_TAG }}/${filename}"
-              
-              # Format it nicely: Device Name + Direct Download Link
-              MSG_TEXT+="📱 <b>${model} (${os_version})</b>%0A"
-              MSG_TEXT+="↳ <a href='${dl_link}'>📥 Download ZIP</a>%0A%0A"
-            fi
-          done
+          # Safely read all zip files into an array
+          shopt -s nullglob
+          ZIPS=(./downloaded-artifacts/*.zip)
+          shopt -u nullglob
           
-          MSG_TEXT+="━━━━━━━━━━━━━━━━━━%0A"
-          MSG_TEXT+="<a href='${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }}'>📝 View Full Release Notes</a>"
+          ZIP_COUNT=${#ZIPS[@]}
           
-          # Send POST request to Telegram API
-          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT_ID}" \
-            -d parse_mode="HTML" \
-            -d disable_web_page_preview="true" \
-            -d text="${MSG_TEXT}" > /dev/null
-            
-          echo "✅ Detailed Telegram notification sent successfully!"
+          if [ "$ZIP_COUNT" -eq 0 ]; then
+            MODELS="None"
+            OS_VERS="None"
+          else
+            # Extract models (2nd part) and OS versions (3rd part) from AK3_OP12_OOS15...zip
+            MODELS=$(printf "%s\n" "${ZIPS[@]}" | awk -F'/' '{print $NF}' | awk -F'_' '{print $2}' | sort -u | paste -sd ", " -)
+            OS_VERS=$(printf "%s\n" "${ZIPS[@]}" | awk -F'/' '{print $NF}' | awk -F'_' '{print $3}' | sort -u | paste -sd ", " -)
+          fi
+          
+          echo "Found $ZIP_COUNT packages for models: $MODELS"
+          
+          # Use pure Bash multi-line string. True newlines are preserved!
+          MSG_TEXT="🚀 <b>OnePlus Kernel Build Successful!</b>
+          ━━━━━━━━━━━━━━━━━━
+          <b>🏷️ Release Tag:</b> <code>${{ env.NEW_TAG }}</code>
+          <b>🔐 Root Solution:</b> ${{ inputs.ksu_type }}
+          <b>🛡️ SUSFS Version:</b> ${{ env.SUSFS_BASE_VERSION }}
+          <b>⚙️ Optimization:</b> ${{ inputs.optimize_level }} | Clean: ${{ inputs.clean_build }}
+          ━━━━━━━━━━━━━━━━━━
+          <b>📦 Total Packages:</b> ${ZIP_COUNT} zips
+          <b>📱 Supported Models:</b> ${MODELS}
+          <b>💻 Supported OS:</b> ${OS_VERS}
+          
+          ━━━━━━━━━━━━━━━━━━
+          👉 <a href=\"${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }}\"><b>📥 GET YOUR KERNEL HERE</b></a>"
+          
+          echo "Constructing secure JSON payload..."
+          
+          # jq automatically escapes the true newlines and HTML characters into a safe JSON string
+          PAYLOAD=$(jq -n \
+            --arg chat_id "$TG_CHAT_ID" \
+            --arg text "$MSG_TEXT" \
+            '{
+              chat_id: $chat_id,
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+              text: $text
+            }')
+          
+          echo "Sending POST request to Telegram API..."
+          
+          # Send payload as application/json
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          
+          # Parse the response body and HTTP code (using your excellent logic)
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Detailed Telegram notification sent successfully! response: $RESPONSE_BODY"
+          else
+            echo "❌ Failed to send Telegram notification! status code: $HTTP_CODE, response: $RESPONSE_BODY"
+            exit 1
+          fi
           echo "::endgroup::"
