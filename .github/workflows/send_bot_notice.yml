@@ -23,8 +23,7 @@ jobs:
       - name: 发送 Telegram 群组通知(频道讨论组)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID_3 }}
-          MESSAGE_THREAD_ID: ${{ secrets.MESSAGE_THREAD_ID_3 }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           set -euo pipefail
           # 定义输入变量
@@ -46,12 +45,6 @@ jobs:
           echo "开始发送Telegram通知..."
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -d "chat_id=${CHAT_ID}" \
-            -d "message_thread_id=${MESSAGE_THREAD_ID}" \
-            -d "parse_mode=HTML" \
-            -d "text=${TEXT}")
-
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-            -d "chat_id=-1003567736013" \
             -d "parse_mode=HTML" \
             -d "text=${TEXT}")
           
