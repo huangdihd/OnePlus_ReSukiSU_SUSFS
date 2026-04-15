@@ -1,4 +1,8 @@
 {
+  "android_kernel_common_oneplus_sm7550": {
+    "oneplus/sm7550_v_15.0.0_nord_ce4": "eccd3911d19d7c47298c04846543ed05f5762049|5.15.180",
+    "oneplus/sm7550_b_16.0.0_nord_ce4": "ebe8a4bbac4dabd6c89e2f58e6f3e23309db1d20|5.15.180"
+  },
   "android_kernel_oneplus_sm8635": {
     "oneplus/sm8635_v_15.0.2_nord5": "9dd94ee69938f6a1f166de4aad51e7ae6913dfab|6.1.118",
     "oneplus/sm8635_b_16.0.0_nord_5": "67f874234ad13c0711bb4f1ffa4698279c830884|6.1.141"
@@ -238,10 +242,6 @@
   },
   "android_kernel_oneplus_sm7635": {
     "oneplus/sm7635_b_16.0.0_turbo_6v": "dd2efd0a202d31916d41f026a47a3355e1806ad1|6.1.118"
-  },
-  "android_kernel_common_oneplus_sm7550": {
-    "oneplus/sm7550_v_15.0.0_nord_ce4": "eccd3911d19d7c47298c04846543ed05f5762049|5.15.180",
-    "oneplus/sm7550_b_16.0.0_nord_ce4": "e603eeba68d674dd4975d42ab2f669b3c4a968d7|5.15.180"
   },
   "android_kernel_oneplus_sm7550": {
     "oneplus/sm7550_v_15.0.0_nord_ce4": "3de0282651c4b43a57e72a9e06dd191a13b02b71|5.15.167",

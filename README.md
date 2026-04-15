@@ -1,5 +1,5 @@
 # 📱 OnePlusOSS Kernel Tracker
-> **Last Update:** Wed Apr 15 11:00:00 UTC 2026 (UTC)
+> **Last Update:** Wed Apr 15 13:26:17 UTC 2026 (UTC)
 Daily automated report for OnePlus Kernel branches.
 ### 📓 Kernel Manifests Report
 <details><summary><b>kernel_manifest</b></summary>
@@ -182,6 +182,19 @@ Daily automated report for OnePlus Kernel branches.
 
 
 ### 🛠 Kernel Trees Report
+<details><summary><b>android_kernel_common_oneplus_sm7550</b></summary>
+
+#### Branch: `oneplus/sm7550_v_15.0.0_nord_ce4` ✅
+* **Kernel Version:** `5.15.180`
+* **Commit SHA:** `eccd391`
+* **Message:** Synchronize code for OnePlus CPH2613_15.0.0.1601(EX01)
+---
+#### Branch: `oneplus/sm7550_b_16.0.0_nord_ce4` 🔄 Updated
+* **Kernel Version:** `5.15.180`
+* **Commit SHA:** `ebe8a4b`
+* **Message:** Synchronize code for OnePlus CPH2613_16.0.5.700(EX01)
+---
+</details>
 <details><summary><b>android_kernel_oneplus_sm8635</b></summary>
 
 #### Branch: `oneplus/sm8635_v_15.0.2_nord5` ✅
@@ -1116,19 +1129,6 @@ Daily automated report for OnePlus Kernel branches.
 * **Kernel Version:** `6.1.118`
 * **Commit SHA:** `dd2efd0`
 * **Message:** Synchronize code for OnePlus PLY110_16.0.2.406(CN01)
----
-</details>
-<details><summary><b>android_kernel_common_oneplus_sm7550</b></summary>
-
-#### Branch: `oneplus/sm7550_v_15.0.0_nord_ce4` ✅
-* **Kernel Version:** `5.15.180`
-* **Commit SHA:** `eccd391`
-* **Message:** Synchronize code for OnePlus CPH2613_15.0.0.1601(EX01)
----
-#### Branch: `oneplus/sm7550_b_16.0.0_nord_ce4` ✅
-* **Kernel Version:** `5.15.180`
-* **Commit SHA:** `e603eeb`
-* **Message:** Synchronize code for OnePlus CPH2613_16.0.2.400(EX01)
 ---
 </details>
 <details><summary><b>android_kernel_oneplus_sm7550</b></summary>
