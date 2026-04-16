@@ -14,11 +14,12 @@
   "disk_cleanup": true,
   "hmbird": false,
   "susfs": true,
-  "lxc_ds": true,
+  "ds": true,
   "bbg": true,
   "bbr": true,
   "ttl": true,
   "ip_set": true,
   "unicode": true,
+  "ntsync": true,
   "uname": "OP-RESUKISU"
 }

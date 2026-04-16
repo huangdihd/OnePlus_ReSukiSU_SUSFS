@@ -51,6 +51,10 @@ on:
         description: 'Clean build (no ccache)'
         type: boolean
         default: false
+      build_timestamp:
+        description: 'Custom kernel build timestamp for uname -a (e.g. "Tue Feb 10 10:01:02 UTC 2026"). Leave empty for current time.'
+        type: string
+        default: ''
       android12-5_10_susfs_branch_or_commit:
         description: 'Enter SusFS Branch or commit hash for android12-5.10'
         type: string
@@ -415,6 +419,14 @@ jobs:
               ksu_display+="🔀 \`$ksu_type\`, \`$ksu_ref\` (\`${{ steps.set-matrix.outputs.ksu_resolved_hash }}\`)"
             fi
           fi
+
+          build_ts_input="${{ inputs.build_timestamp }}"
+          if [ -z "$build_ts_input" ]; then
+            build_ts_display="⏱️ auto (current build time)"
+          else
+            build_ts_display="📌 \`$build_ts_input\`"
+          fi
+          
           {
             cat << 'EOF'
           ## 🎯 Build Plan
@@ -426,6 +438,7 @@ jobs:
           EOF
           
             echo "- KSU Config: $ksu_display"
+            echo "- Build Timestamp: $build_ts_display"
           
             cat << 'EOF'
           - Optimization: ${{ inputs.optimize_level }}
@@ -481,7 +494,7 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "> **⚠️ Android-Kernel Filter:** Only OOS15 and OOS16 devices will be built for \`${{ inputs.op_model }}\`" >> $GITHUB_STEP_SUMMARY
           fi
-
+          
   build:
     name: build (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ matrix.os_version }}, ${{ matrix.ksu_type }})
     needs: set-op-model
@@ -576,6 +589,7 @@ jobs:
           ksu_branch_or_hash: ${{ matrix.ksu_resolved_hash }}
           susfs_commit_hash_or_branch: ${{ matrix.susfs_resolved_hash }}
           optimize_level: ${{ inputs.optimize_level }}
+          build_timestamp: ${{ inputs.build_timestamp }}
           clean: ${{ inputs.clean_build }}
 
       - name: 📊 Build statistics
@@ -829,7 +843,7 @@ jobs:
             feature_flags=$(jq -r --arg MODEL "$model" '
               .[] | 
               select(.model == $MODEL) |
-              "\(.hmbird // false)\t\(.susfs // false)\t\(.bbr // false)\t\(.bbg // false)\t\(.ttl // false)\t\(.ip_set // false)\t\(.unicode // false)\t\(.lxc_ds // false)"
+              "\(.hmbird // false)\t\(.susfs // false)\t\(.bbr // false)\t\(.bbg // false)\t\(.ttl // false)\t\(.ip_set // false)\t\(.unicode // false)\t\(.ds // false)\t\(.ntsync // false)"
             ' <<< "$JSON_BUILD_DATA")
             
             features=""
@@ -837,7 +851,7 @@ jobs:
             if [[ -z "$feature_flags" ]]; then
               echo "Warning: No JSON entry found for model: $model" >&2
             else
-              IFS=$'\t' read -r hmbird susfs bbr bbg ttl ip_set unicode lxc_ds <<< "$feature_flags"
+              IFS=$'\t' read -r hmbird susfs bbr bbg ttl ip_set unicode ds ntsync <<< "$feature_flags"
               
               # Build features string based on boolean values
               [[ "$hmbird" == "true" ]] && features+="🐦 HMBIRD "
@@ -847,7 +861,8 @@ jobs:
               [[ "$ttl" == "true" ]] && features+="🌐 TTL "
               [[ "$ip_set" == "true" ]] && features+="🧱 IP_SET & IPv6 NAT"
               [[ "$unicode" == "true" ]] && features+="🔧 Unicode Fix"
-              [[ "$lxc_ds" == "true" ]] && features+="💻 LXC / Droidspaces Support"
+              [[ "$ds" == "true" ]] && features+="💻 Droidspaces Support"
+              [[ "$ntsync" == "true" ]] && features+="🔃 NTSync Support"
             fi
             
             printf "| %-13s | %-10s | %-16s | %-30s |\n" \
@@ -961,7 +976,8 @@ jobs:
           - **TMPFS_XATTR** - Extended attributes for tmpfs (Mountify support)
           - **TMPFS_POSIX_ACL** - POSIX ACLs for tmpfs
           - **HMBIRD SCX** - Scheduler extensions for all SM8750/MT6991 devices
-          - **LXC / Droidspaces** - Support Portable Linux containers to run full Linux environments.
+          - **Droidspaces** - Support Portable Linux containers to run full Linux environments.
+          - **NTSync** - Provide high-performance, low-latency synchronization primitives compatible with the Windows NT kernel API
           
           ---
           
@@ -1019,6 +1035,8 @@ jobs:
           - Compiler optimizations (${{ inputs.optimize_level }}).
           - Additional General Optimisations.
           - Unicode Bypass Fix
+          - Droidspaces Support
+          - NTSync Support
           
           ### Previous Releases
           See [Releases Page](${{ github.server_url }}/${{ github.repository }}/releases)
