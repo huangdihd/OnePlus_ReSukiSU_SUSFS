@@ -854,7 +854,15 @@ runs:
         KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
-        sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        if [ -f ksu.c ]; then
+          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        fi
+        
+        if [[ "$KSU_VERSION" -gt 33095 ]] && [[ "$KERNEL_VERSION" == "6.12" ]]; then
+          sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
+          sed -i 's|$(src)|$(abspath $(src))|' Kbuild
+          sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
+        fi
         
         if [ "$KSU_VERSION" -lt 12884 ]; then
           echo "NEED_HOOKS=true" >> $GITHUB_ENV
@@ -900,7 +908,9 @@ runs:
         KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
         sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
-        sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        if [ -f ksu.c ]; then
+          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        fi
         
         echo "NEED_HOOKS=false" >> $GITHUB_ENV
         
@@ -1009,8 +1019,10 @@ runs:
               patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
               echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
               patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+              if [ "$KSUVER" -le 33095 ]; then
               echo "Patching Multi-manager Support for SusFS kernel!"
               patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_manager.patch"
+              fi
               if [ "$KSUVER" -ge 33068 ] && [ "$KSUVER" -lt 33070 ]; then
                 echo "Patching Multi-manager sepolicy Support for SusFS kernel!"
                 patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_sepolicy_fix.patch"
