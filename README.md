@@ -1,5 +1,5 @@
 # 📱 OnePlusOSS Kernel Tracker
-> **Last Update:** Sat Apr 18 02:37:06 UTC 2026 (UTC)
+> **Last Update:** Sat Apr 18 05:42:00 UTC 2026 (UTC)
 Daily automated report for OnePlus Kernel branches.
 ### 📓 Kernel Manifests Report
 <details><summary><b>kernel_manifest</b></summary>
@@ -182,6 +182,29 @@ Daily automated report for OnePlus Kernel branches.
 
 
 ### 🛠 Kernel Trees Report
+<details><summary><b>android_kernel_oneplus_mt6789</b></summary>
+
+#### Branch: `oneplus/mt6789_v_15.0.1_pad_lite` ✅
+* **Kernel Version:** `5.10.226`
+* **Commit SHA:** `9845d4a`
+* **Message:** Synchronize code for OnePlus OPD2480_15.0.1.503(EX01)
+---
+#### Branch: `oneplus/mt6789_u_14.0.0_onepluspad_go` ✅
+* **Kernel Version:** `5.10.209`
+* **Commit SHA:** `a219842`
+* **Message:** Synchronize code for OnePlus OPD2304_14.0.0.809(EX01) OPD2305_14.0.0.809(EX01)
+---
+#### Branch: `oneplus/mt6789_t_13.2.0_onepluspad_go` ✅
+* **Kernel Version:** `5.10.168`
+* **Commit SHA:** `dc7f73a`
+* **Message:** Synchronize code for OnePlus OPD2304_13.2.0.420(EX01)
+---
+#### Branch: `oneplus/mt6789_b_16.0_pad_lite` 🆕
+* **Kernel Version:** `4.20.0`
+* **Commit SHA:** `e154ab6`
+* **Message:** Input: elan_i2c - add id for touchpad found in Lenovo s21e-20
+---
+</details>
 <details><summary><b>android_kernel_oneplus_mt6991</b></summary>
 
 #### Branch: `oneplus/mt6991_v_15.0.2_ace5_ultra` ✅
@@ -1241,24 +1264,6 @@ Daily automated report for OnePlus Kernel branches.
 * **Kernel Version:** `5.10.149`
 * **Commit SHA:** `b2ed059`
 * **Message:** Synchronize code for oneplus PGKM10_13.1.0.9
----
-</details>
-<details><summary><b>android_kernel_oneplus_mt6789</b></summary>
-
-#### Branch: `oneplus/mt6789_v_15.0.1_pad_lite` ✅
-* **Kernel Version:** `5.10.226`
-* **Commit SHA:** `9845d4a`
-* **Message:** Synchronize code for OnePlus OPD2480_15.0.1.503(EX01)
----
-#### Branch: `oneplus/mt6789_u_14.0.0_onepluspad_go` ✅
-* **Kernel Version:** `5.10.209`
-* **Commit SHA:** `a219842`
-* **Message:** Synchronize code for OnePlus OPD2304_14.0.0.809(EX01) OPD2305_14.0.0.809(EX01)
----
-#### Branch: `oneplus/mt6789_t_13.2.0_onepluspad_go` ✅
-* **Kernel Version:** `5.10.168`
-* **Commit SHA:** `dc7f73a`
-* **Message:** Synchronize code for OnePlus OPD2304_13.2.0.420(EX01)
 ---
 </details>
 <details><summary><b>android_kernel_oneplus_mt6833</b></summary>
