@@ -1,0 +1,7 @@
+.actrc
+.env
+.input
+.vscode
+*.Identifier
+*.orig
+*.rej
