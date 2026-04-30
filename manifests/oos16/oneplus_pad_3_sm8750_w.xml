@@ -2,6 +2,8 @@
 <manifest>
   <remote fetch="https://git.codelinaro.org/clo/la" name="clo-la"/>
   <remote fetch="https://github.com/OnePlusOSS" name="origin"/>
+  <remote fetch="https://github.com/WildKernels" name="wild"/>
+  <project remote="wild" name="AnyKernel3" path="AnyKernel3" revision="d1ebdc2002c557ceff9939afc3098eb88916f464"/>
   <default remote="clo-la" revision="dummy_revision" sync-c="true" sync-tags="false"/>
   <project remote="origin" name="android_kernel_common_oneplus_sm8750" path="kernel_platform/common" revision="oneplus/sm8750_b_16.0.0_pad_3">
     <linkfile dest="kernel_platform/.source_date_epoch_dir" src="."/>

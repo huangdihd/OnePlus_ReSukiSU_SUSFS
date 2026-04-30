@@ -76,7 +76,7 @@ body:
     attributes:
       label: Manager & Driver Version
       description: Manager and driver version as shown in the manager app.
-      placeholder: "e.g. KSUN v3.2.0 (33129) — driver 33129"
+      placeholder: "e.g. ReSukiSU v3.2.0 (33129) — driver 33129"
     validations:
       required: true
 
