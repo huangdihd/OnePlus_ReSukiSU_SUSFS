@@ -8,7 +8,7 @@ body:
       value: |
         > [!NOTE]
         > Use this template to request the addition of a kernel patch or feature to this build (e.g. droidspace, ntsync, hmbird, scheduler tweaks, etc.).
-        > KernelSU-Next and SUSFS options are managed by their respective upstream repositories — open issues there instead.
+        > KernelSU and SUSFS options are managed by their respective upstream repositories — open issues there instead.
 
   - type: checkboxes
     id: prerequisites
@@ -17,7 +17,7 @@ body:
       options:
         - label: I have searched existing issues and this is not a duplicate.
           required: true
-        - label: This is a kernel patch/feature request, not a request for KernelSU-Next or SUSFS.
+        - label: This is a kernel patch/feature request, not a request for KernelSU or SUSFS.
           required: true
 
   - type: input

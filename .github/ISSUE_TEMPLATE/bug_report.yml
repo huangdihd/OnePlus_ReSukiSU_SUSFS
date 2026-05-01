@@ -74,10 +74,8 @@ body:
     attributes:
       label: Manager Type
       options:
-        - KernelSU-Next
         - KernelSU
-        - WildKSU
-        - pershoot KSUN
+        - ReSukiSU
     validations:
       required: true
 
@@ -187,7 +185,7 @@ body:
     attributes:
       label: Manager Log (name_log.tar.gz)
       description: |
-        Export logs from KSUN: **Settings → Export logs** → a `name_log.tar.gz` file will be generated.
+        Export logs from KernelSU/ReSukiSU Manager: **Settings → Export logs** → a `name_log.tar.gz` file will be generated.
         Attach it here by dragging and dropping the file into this field, or click the attachment icon below the text box.
       placeholder: "Drag and drop name_log.tar.gz here, or click the attachment icon below..."
     validations:
