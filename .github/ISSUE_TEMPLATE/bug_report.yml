@@ -74,10 +74,8 @@ body:
     attributes:
       label: Manager Type
       options:
-        - KernelSU-Next
+        - ReSukiSU
         - KernelSU
-        - WildKSU
-        - pershoot KSUN
     validations:
       required: true
 

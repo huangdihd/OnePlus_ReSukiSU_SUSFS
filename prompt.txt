@@ -1,0 +1,44 @@
+Check for upstream repository modifications from https://github.com/WildKernels/OnePlus_KernelSU_SUSFS.
+If there are new updates, YOU MUST use a standard `git merge upstream/main` (or equivalent) to integrate the updates. 
+WARNING: Do NOT run `git merge --abort` and switch to manually checking out files (e.g. `git checkout upstream/main -- configs/`)! You MUST resolve the conflicts within the merge process itself to preserve the upstream Git history and commit signatures. DO NOT squash everything into a single manual commit!
+After the merge is successfully committed, create a Pull Request. YOU MUST STRICTLY FOLLOW THESE MERGE GUIDELINES:
+
+# Project Maintenance & Upstream Sync Guidelines (OnePlus_KernelSU_SUSFS)
+This project is a fork of WildKernels, but maintains independence in core logic and Root solution selection. You must strictly adhere to the following guidelines.
+
+## 🚫 Strictly Forbidden (DO NOT BRING THESE IN)
+1. Reject Normalize Scheme
+* Background: Upstream introduced a matrix generation logic based on `ksu_options_normalized`.
+* Requirement: PROHIBITED to introduce any code containing the keyword `normalized` in `.github/workflows/build-kernel-release.yml`.
+* Adherence: Maintain the existing `set-matrix` logic, which manually selects the distribution mode via `inputs.ksu_type`.
+2. Reject KernelSU-Next (KSUN) and WildKSU
+* Background: We have shifted our core Root solution to ReSukiSU.
+* Requirement: PROHIBITED to add `KSUN` or `WildKSU` to the `ksu_type` options in `.github/actions/action.yml` (or related build scripts).
+* Adherence: The core Root solution must only retain `KSU` and `ReSukiSU`.
+3. Preserve Original Telegram Channel Links
+* Requirement: PROHIBITED to replace our Telegram links with the upstream's links.
+* Adherence: You must ensure that our original Telegram links (`https://t.me/huangdihd` and `https://t.me/huangdihd_wildkernel`) are kept intact in `README.md`.
+4. Preserve AnyKernel3 Repository
+* Requirement: PROHIBITED to change the AnyKernel3 clone URL to upstream's.
+* Adherence: You must ensure the AnyKernel3 URL in `.github/actions/build-kernel/action.yml` remains `https://github.com/huangdihd/AnyKernel3`.
+5. Reject Upstream Kernel Suffix (WILD)
+* Requirement: PROHIBITED to use `-OP-WILD` or `OP-WILD` anywhere.
+* Adherence: 
+  - Ensure the fallback logic in `.github/actions/build-kernel/action.yml` does not use `-OP-WILD`.
+  - Ensure that the `"uname"` field in ANY JSON file inside the `configs/` directory is set to `"OP-RESUKISU"`. If upstream adds a new config with `"uname": "OP-WILD"`, you MUST change it to `"OP-RESUKISU"`.
+
+## ✅ Allowed to Sync (FOCUS ON THESE)
+* Device Configurations: New device JSON files in the `configs/` directory (e.g., OP13, OP15, etc.).
+* New Features: Functional patches like `lxc_ds` (Droidspaces/LXC support), `HMBIRD` optimizations, etc.
+* Performance Optimizations: Logic introduced by upstream in the `set-op-model` task to parse hashes via GraphQL API.
+* Compiler Updates: Path optimizations or version updates for Clang/Rust toolchains.
+
+## 🛠️ Post-Sync Checklist
+Before submitting the PR, audit the repository:
+1. Audit ksu_type: Ensure `grep "KSUN" .github/actions/action.yml` or `build-kernel-release.yml` returns no matches.
+2. Audit Normalize logic: Ensure `grep "normalized" .github/workflows/build-kernel-release.yml` returns no matches.
+3. Audit ReSukiSU Integrity: Ensure the "Add ReSukiSU" steps in `action.yml` have not been deleted, and the project description in `README.md` has not been overwritten by upstream.
+4. Audit Telegram Links: Verify that the Telegram links in `README.md` still point to `https://t.me/huangdihd` and `https://t.me/huangdihd_wildkernel`.
+
+## ⚠️ Abort Condition (IMPORTANT)
+If you detect that upstream has not fully completed their modification (e.g., missing files, broken logic), actively ABANDON this sync. Do not create a PR, or close it, and leave a comment explaining what was incomplete.
