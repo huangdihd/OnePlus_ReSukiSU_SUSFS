@@ -13,7 +13,7 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  pull_request:
+  pull_request_target: # 关键修复：使用 pull_request_target 以获得写权限
     types: [opened, synchronize]
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
     if: |
       always() && 
       (
-        (needs.check-upstream.result == 'success' && needs.check-upstream.outputs.has_updates == 'true') ||
+        (needs.check-upstream.result == 'success' && needs.check-updates.outputs.has_updates == 'true') ||
         (github.event_name == 'issue_comment' && (contains(github.event.comment.body, ' /oc') || startsWith(github.event.comment.body, '/oc') || contains(github.event.comment.body, ' /opencode') || startsWith(github.event.comment.body, '/opencode'))) ||
         (github.event_name == 'pull_request_review_comment' && (contains(github.event.comment.body, ' /oc') || startsWith(github.event.comment.body, '/oc') || contains(github.event.comment.body, ' /opencode') || startsWith(github.event.comment.body, '/opencode')))
       )
@@ -70,7 +70,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          # Set to false to avoid "Duplicate header: Authorization" conflict with GITHUB_TOKEN in env
+          # Disable persisting credentials to prevent conflicts with GITHUB_TOKEN environment variable
           persist-credentials: false
 
       - name: Prepare Prompt
@@ -153,7 +153,7 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           XIAOMI_API_KEY: ${{ secrets.XIAOMI_API_KEY }}
-          # Using GITHUB_TOKEN as it was present during the previous successful run.
+          # Using GITHUB_TOKEN to ensure permission assertion passes.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: xiaomi-token-plan-cn/mimo-v2-pro
@@ -161,13 +161,17 @@ jobs:
 
   set-matrix:
     name: Generate Test Matrix
-    if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'opencode/')
+    # 针对 pull_request_target 进行适配
+    if: github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'opencode/')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
+        with:
+          # 在 pull_request_target 中必须显式检出 PR 的 head 才能测试 PR 代码
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Generate build matrix
         id: set-matrix
@@ -186,8 +190,6 @@ jobs:
           done
           echo "]" >> matrix.json
           
-          # Only test a small subset or specific required matrix logic.
-          # Here we test ALL configs found.
           filtered=$(jq -c '.' matrix.json)
           wrapped=$(jq -n --argjson items "$filtered" '{ include: $items }')
           echo "matrix=$(jq -c . <<< "$wrapped")" >> "$GITHUB_OUTPUT"
@@ -202,6 +204,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Install Minimal Dependencies
         run: |
@@ -209,7 +213,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git curl ca-certificates build-essential clang lld flex bison \
             libelf-dev libssl-dev libncurses-dev zlib1g-dev liblz4-tool \
-            libxml2-utils rsync unzip dwarves file python3 bc dos2unix kmod libdw-dev elfutils pigz jq
+            libxml2-utils rsync rsync unzip dwarves file python3 bc dos2unix kmod libdw-dev elfutils pigz jq
 
       - name: Prepare op_config_json
         id: prepare_config
@@ -224,7 +228,6 @@ jobs:
           op_config_json: ${{ steps.prepare_config.outputs.config_json }}
           ksu_type: "ReSukiSU"
           ksu_branch_or_hash: "main"
-          # Mock SUSFS branch/hash based on android version since it's just a test
           susfs_commit_hash_or_branch: "gki-${{ matrix.android_version }}-${{ matrix.kernel_version }}"
           optimize_level: "O2"
           build_timestamp: ""
@@ -235,7 +238,7 @@ jobs:
   report-test-result:
     name: Report and Auto-Fix
     needs: [test-build]
-    if: always() && github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'opencode/')
+    if: always() && github.event_name == 'pull_request_target' && startsWith(github.event.pull_request.head.ref, 'opencode/')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -246,6 +249,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Prepare TG Message
         id: prep-msg
@@ -274,7 +280,6 @@ jobs:
         continue-on-error: true
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          # Use dedicated TG_TEST_CHAT_ID for test builds, fallback to general TG_CHAT_ID
           TG_CHAT_ID: ${{ secrets.TG_TEST_CHAT_ID || secrets.TG_CHAT_ID }}
         run: |
           if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
@@ -283,25 +288,14 @@ jobs:
           fi
           
           MSG_TEXT="${{ steps.prep-msg.outputs.msg }}"
-          
-          # Split TG_CHAT_ID by comma or space
           IFS=' ,' read -r -a CHAT_IDS <<< "$TG_CHAT_ID"
           
           for ID in "${CHAT_IDS[@]}"; do
             if [ -z "$ID" ]; then continue; fi
-            PAYLOAD=$(jq -n \
-              --arg chat_id "$ID" \
-              --arg text "$MSG_TEXT" \
-              '{
-                chat_id: $chat_id,
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-                text: $text
-              }')
-            
+            PAYLOAD=$(jq -n --arg chat_id "$ID" --arg text "$MSG_TEXT" \
+              '{chat_id: $chat_id, parse_mode: "HTML", disable_web_page_preview: true, text: $text}')
             curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD" > /dev/null
+              -H "Content-Type: application/json" -d "$PAYLOAD" > /dev/null
           done
 
       - name: Run opencode to fix build
@@ -309,18 +303,17 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           XIAOMI_API_KEY: ${{ secrets.XIAOMI_API_KEY }}
+          # 在 pull_request_target 下，这个 token 将拥有真实的写权限
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: xiaomi-token-plan-cn/mimo-v2-pro
           prompt: "The matrix test build failed for one or more devices. Please check the GitHub Actions logs for the failed 'test-build' jobs to identify the compilation errors. Fix the code to resolve these compilation errors and push the updates to the PR branch. \n\nIMPORTANT RE-TRIGGER RULE: Even if you find no bugs to fix or your investigation results in no code changes, YOU MUST push a commit to the PR branch to re-trigger the verification. Use `git commit --allow-empty -m 'chore: trigger re-verification'` if necessary. Verification MUST run again.\n\nIF YOU ENCOUNTER A TOOLCHAIN CACHE ERROR (e.g., '[FATAL ERROR] Toolchain AnyKernel3... NOT FOUND in GitHub Release cache!'):\nThis means a newly added toolchain hasn't been mirrored to GitHub releases yet. You MUST manually trigger the mirror workflow for your PR branch using the following command in your terminal:\n`gh workflow run mirror-toolchains.yml --ref <your-pr-branch-name>`\nWait a minute for it to complete, and then trigger a new test build by pushing an empty commit."
 
       - name: Force Rerun on Sync (Fallback)
-        # 即使 Agent 忘了推空提交，我们也在这里手动尝试重新触发失败的任务（需要 GH_TOKEN 权限）
         if: always() && needs.test-build.result != 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 尝试通过 CLI 重新运行失败的任务，作为最后的保险
           gh run rerun ${{ github.run_id }} --failed || echo "Rerun skipped or failed"
 
       - name: Fail the workflow
