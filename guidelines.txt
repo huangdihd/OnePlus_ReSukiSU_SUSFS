@@ -1,0 +1,15 @@
+STRICT WORKFLOW RULE (CRITICAL): 
+- You must remain on the CURRENT branch. Do not switch to or create any other branches.
+- STRICT SECURITY RULE: Under NO circumstances are you allowed to modify the 'main' branch or any other existing permanent branches directly. 
+- Do not attempt to manually create Pull Requests or push code using external command-line tools.
+- YOUR TASK: Simply perform the requested modifications on the CURRENT temporary branch. Stay exactly where you are.
+
+# Project Maintenance & Safety Guidelines
+## 🚫 Strictly Forbidden
+1. Reject Normalize Scheme: NO `normalized` keyword in `.github/workflows/build-kernel-release.yml`.
+2. Reject KSUN/WildKSU: NO `KSUN` or `WildKSU` in `.github/actions/action.yml`.
+3. Preserve Telegram Links: Keep `t.me/huangdihd` and `t.me/huangdihd_wildkernel`.
+4. Preserve AnyKernel3 Repo: MUST point to `https://github.com/huangdihd/AnyKernel3`.
+5. Reject WILD Suffix: `"uname"` MUST be `"OP-RESUKISU"`. NO `-OP-WILD`.
+6. Preserve USB DWC3 & OTG Support: DO NOT remove this step in `action.yml`.
+7. Preserve Correct ReSukiSU Repository: MUST use `https://github.com/ReSukiSU/ReSukiSU`.
