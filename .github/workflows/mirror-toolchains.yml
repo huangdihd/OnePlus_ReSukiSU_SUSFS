@@ -81,7 +81,8 @@ jobs:
               "clang/host/linux-x86": "clang",
               "prebuilts/rust": "rust",
               "prebuilts/clang-tools": "clang-tools",
-              "prebuilts/build-tools": "build-tools"
+              "prebuilts/build-tools": "build-tools",
+              "AnyKernel3": "AnyKernel3"
           }
           
           print(f"Processing {len(configs)} configurations...")
@@ -122,14 +123,20 @@ jobs:
                       if type_label:
                         remote_name = project.get('remote', def_remote)
                         rev = project.get('revision', def_rev)
-                        base_url = remotes.get(remote_name, "")
+                        base_url = remotes.get(remote_name, "").rstrip('/')
                         cache_filename = f"{type_label}-{rev}.tar.gz"
                         
-                        if cache_filename not in unique_toolchains and ("git.codelinaro.org" in base_url or "googlesource.com" in base_url):
+                        if cache_filename not in unique_toolchains:
                             if "googlesource.com" in base_url:
                                 dl_url = f"{base_url}/{name}/+archive/{rev}.tar.gz"
-                            else:
+                            elif "github.com" in base_url:
+                                dl_url = f"{base_url}/{name}/archive/{rev}.tar.gz"
+                            elif "git.codelinaro.org" in base_url or "gitlab.com" in base_url:
                                 dl_url = f"{base_url}/{name}/-/archive/{rev}.tar.gz"
+                            else:
+                                error_msg = f"❌ [FATAL] Unknown toolchain provider for: {base_url}"
+                                print(f"::error::{error_msg}")
+                                raise ValueError(error_msg)
                             unique_toolchains[cache_filename] = {"rev": rev, "url": dl_url, "name": name, "type_label": type_label, "cache_file": cache_filename}
                             print(f"🆕 [{op_model}][{op_os_version}] -> New {type_label} found: {rev}")
                         else:
