@@ -87,6 +87,24 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Get Action info
+      shell: bash
+      env:
+        ACTION_REPO_VAL: ${{ github.action_repository }}
+        ACTION_REF_VAL: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        echo "ACTION_REPO=$ACTION_REPO_VAL" >> $GITHUB_ENV
+        echo "ACTION_REF=$ACTION_REF_VAL" >> $GITHUB_ENV
+
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ env.ACTION_REPO }}
+        ref: ${{ env.ACTION_REF }}
+        path: action-source
+        fetch-depth: 1
+
     - name: Parse op_config_json
       shell: bash
       run: |
@@ -304,7 +322,7 @@ runs:
 
     - name: Sync Kernel Source
       id: sync-kernel-source
-      uses: ./.github/actions/kernel-source-sync
+      uses: ./action-source/.github/actions/kernel-source-sync
       with:
         source_location: ${{ env.CONFIG }}
         github_token: ${{ inputs.github_token }}
@@ -319,7 +337,7 @@ runs:
         KERNEL_PLATFORM_DIR="$CONFIG_DIR/kernel_platform"
         COMMON_KERNEL_DIR="$KERNEL_PLATFORM_DIR/common"
         MSM_KERNEL_DIR="$KERNEL_PLATFORM_DIR/msm-kernel"
-        AK3_DIR="$GITHUB_WORKSPACE/AnyKernel3"
+        AK3_DIR="$CONFIG_DIR/AnyKernel3"
         DEBUG_ARTIFACTS_DIR="$GITHUB_WORKSPACE/debug_artifacts"
         KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
         SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
@@ -642,17 +660,31 @@ runs:
         make V=1 rustavailable
         echo "::endgroup::"
 
-
-    - name: Cache ccache
-      uses: actions/cache@v5
+    - name: Restore ccache cache
+      id: restore-ccache-cache
+      uses: ./action-source/.github/actions/cache/restore
       if: ${{ inputs.clean == false || inputs.clean == 'false' }}
       with:
-        path: ${{ env.CCACHE_DIR }}
-        key: ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
-        restore-keys: |
+        cache_path: ${{ env.CCACHE_DIR }}
+        cache_key: ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_bucket: "ccache-cache"
+        debug: ${{ inputs.debug }}
+        restore_keys: |
           ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
           ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
-   
+
+    - name: Restore LTO LD cache
+      id: restore-lto-ld-cache
+      uses: ./action-source/.github/actions/cache/restore
+      if: ${{ (inputs.clean == false && env.OP_LTO != 'none') || (inputs.clean == 'false' && env.OP_LTO != 'none') }}
+      with:
+        cache_path: ${{ env.LDCACHE_DIR }}
+        cache_key: ccache-kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_bucket: "lto-cache"
+        debug: ${{ inputs.debug }}
+        restore_keys: |
+          ccache-kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
+          ccache-kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
     - name: Check ccache
       shell: bash
       run: |
@@ -669,6 +701,9 @@ runs:
           echo ""
           echo "Pre-build cache statistics:"
           ccache -s | head -n 20
+          
+          echo "Updating atime to achive cache eviction"
+          find ${{ env.CCACHE_DIR }} -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} +
         else
           echo "⚠️ No existing cache - building from scratch"
           echo "Cache will be populated for future builds"
@@ -677,14 +712,13 @@ runs:
         ccache -z
         echo "::endgroup::"
 
-    - name: Clone AnyKernel3 and Other Dependencies
+    - name: Fetch SusFS and Other Dependencies
       shell: bash
       run: |
+        echo "::group::Fetch dependencies"
         set -euo pipefail
-        echo "::group::Clone dependencies"
-        echo "Cloning AnyKernel3 and other dependencies..."
+        echo "Fetching SusFS and other dependencies..."
         
-        ANYKERNEL_BRANCH="gki-2.0"
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           # Determine SUSFS branch/commit to use
@@ -712,11 +746,61 @@ runs:
           fi
         fi
         
-        echo "Using AnyKernel3 branch: $ANYKERNEL_BRANCH"
-        
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
-        fi
+        retry_fetch_archive() {
+          local url="$1"
+          local branch="${2:-main}"
+          local max_attempts=3
+          local attempt=1
+          
+          local repo_name=$(basename "$url" .git)
+          local safe_branch=$(echo "$branch" | tr '/' '_')
+          local archive_name="${repo_name}_${safe_branch}.tar.gz"
+          local shm_path="/dev/shm/$archive_name"
+          
+          local nproc=$(nproc 2>/dev/null || echo 4)
+          
+          local aria_log_flags="--quiet --summary-interval=0"
+          if [ "${{ inputs.debug }}" = "true" ]; then
+              aria_log_flags="--summary-interval=5" # Show progress every 5s in debug
+          fi
+          
+          local aria2_headers=(
+            "--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "--header=Accept: */*"
+            "--header=Connection: keep-alive"
+          )
+          
+          local download_url=""
+          if [[ "$url" == *"github.com"* ]]; then
+              download_url="${url%.git}/archive/refs/heads/${branch}.tar.gz"
+          elif [[ "$url" == *"gitlab.com"* ]]; then
+              download_url="${url%.git}/-/archive/${branch}/${repo_name}-${branch}.tar.gz"
+          else
+              echo "::error::Unsupported host: $url"
+              return 1
+          fi
+          
+          while [ $attempt -le $max_attempts ]; do
+              echo " Attempt $attempt/$max_attempts: High-speed fetch for $repo_name ($branch)"
+              
+              if aria2c -x16 -s16 -j16 -k1M --retry-wait=2 --max-tries=5 -d "/dev/shm" -o "$archive_name" --allow-overwrite=true "${aria2_headers[@]}" $aria_log_flags "$download_url"; then
+                  mkdir -p "$repo_name"
+                  if tar -I "pigz -p $nproc -b 256" -x --record-size=1M -f "$shm_path" -C "$repo_name" --strip-components=1 --no-same-owner; then
+                      echo "✅ Success: $repo_name synced"
+                      rm -f "$shm_path"
+                      return 0
+                  fi
+              fi
+              
+              echo "⚠️ Attempt $attempt failed, clearing RAM and retrying..."
+              rm -rf "$repo_name" "$shm_path" 2>/dev/null
+              sleep 5
+              attempt=$((attempt + 1))
+          done
+          
+          echo "::error::All attempts failed for $url"
+          return 1
+        }
         
         retry_clone() {
           local url="$1"
@@ -778,62 +862,36 @@ runs:
 
         echo "Downloading SukiSU_KernelPatch..."
         PATCH_URL=$(curl -sSL -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/latest | grep "browser_download_url" | grep "patch_linux" | cut -d '"' -f 4 | head -n 1)
-        
+
         if [ -z "$PATCH_URL" ]; then
           echo "::error::Failed to fetch the SukiSU_KernelPatch download link! The API might be rate-limited or the repository is inaccessible."
           exit 1
         fi
-        
+
         echo "✅ Successfully fetched patch URL: $PATCH_URL"
         retry_download "$PATCH_URL" "patch_linux"
         chmod +x patch_linux
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
-          retry_clone "https://gitlab.com/simonpunk/susfs4ksu.git" "master" 0
-          
-          cd susfs4ksu
-          
-          # Try to checkout the specified branch/commit
-          if git rev-parse --verify "origin/$SUSFS_BRANCH" >/dev/null 2>&1; then
-            # It's a remote branch
-            echo "✅ Checking out remote branch: $SUSFS_BRANCH"
-            git checkout "$SUSFS_BRANCH"
-          elif git rev-parse --verify "$SUSFS_BRANCH" >/dev/null 2>&1; then
-            # It's a local ref or commit hash
-            echo "✅ Checking out ref/commit: $SUSFS_BRANCH"
-            git checkout "$SUSFS_BRANCH"
-          else
-            echo "::error::SUSFS branch or commit '$SUSFS_BRANCH' not found in repository"
-            echo ""
-            echo "Available remote branches:"
-            git branch -r | head -n 20
+          echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
+          if ! retry_fetch_archive "https://gitlab.com/simonpunk/susfs4ksu.git" "$SUSFS_BRANCH"; then
+            echo "::error::Failed to fetch SUSFS archive after multiple attempts"
             exit 1
           fi
-          
-          SUSFS_COMMIT_SHA=$(git rev-parse HEAD)
-          SUSFS_BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
-          
-          echo "SUSFS_COMMIT_SHA=$SUSFS_COMMIT_SHA" >> $GITHUB_ENV
-          echo "SUSFS_BRANCH_NAME=$SUSFS_BRANCH_NAME" >> $GITHUB_ENV
-          
-          echo ""
-          echo "✅ SUSFS checked out successfully"
-          echo "   Branch/Ref: $SUSFS_BRANCH_NAME"
-          echo "   Commit: $SUSFS_COMMIT_SHA"
+          echo "SUSFS_COMMIT_SHA=$SUSFS_BRANCH" >> $GITHUB_ENV
         fi
-        cd ..
         echo "✅ Dependencies cloned"
         echo "::endgroup::"
 
     - name: Clean Up ABI Protected Exports
       shell: bash
       run: |
+        echo "::group::Clean Up ABI Protected Exports"
         set -euo pipefail
         cd "$KERNEL_PLATFORM_FOLDER"
         rm -f common/android/abi_gki_protected_exports_* || true
-        rm -f msm-kernel/android/abi_gki_protected_exports_* || true
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
-        df -h
+        echo "::endgroup::"
 
 
     - name: Add KernelSU
@@ -853,7 +911,6 @@ runs:
         
         git submodule update --init --recursive
         cd KernelSU/kernel
-        
         BASE_VERSION=30000
         KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
         
@@ -869,6 +926,12 @@ runs:
           sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' core.c
         else
           echo "ℹ️ Modern KSU structure detected, skipping legacy stackprotector patch."
+        fi
+        
+        if [[ "$KSU_VERSION" -gt 32427 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
+          sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
+          sed -i 's|$(src)|$(abspath $(src))|' Kbuild
+          sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
         fi
         
         echo "NEED_HOOKS=false" >> $GITHUB_ENV
@@ -1382,8 +1445,8 @@ runs:
       shell: bash
       if: ${{ env.OP_DS == 'true' }}
       run: |
-        set -euo pipefail
         echo "::group::Add Droidspaces Support"
+        set -euo pipefail
         cd "$COMMON_KERNEL_FOLDER"
         
         echo "Applying patch to enable SYSVIPC without breaking ABI"
@@ -1393,6 +1456,14 @@ runs:
             ;;
           wild/sm8550|wild/sm7550)
             patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_1_2_3.patch"
+            ;;
+          wild/sm8450|wild/sm8475|wild/mt6895|wild/mt6983|wild/mt6789)
+            if [ "$ANDROID_VER" = "android12" ] && [ "$KERNEL_VER" = "5.10" ]; then
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_bypass_a16-6.12_below.patch"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_abi_padding_for_posix_mqueue.patch"
+            else
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"
+            fi
             ;;
           *)
             patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"
@@ -1476,6 +1547,7 @@ runs:
         sed -i '/obj-y.*gpueb/d' "$COMMON_KERNEL_FOLDER/drivers/gpu/mediatek/Makefile"
 
     - name: Build Kernel
+      id: build_kernel_step
       shell: bash
       env:
         PYTHONWARNINGS: "ignore:invalid escape sequence"
@@ -1512,6 +1584,10 @@ runs:
         source "$KERNEL_PLATFORM_FOLDER/build/kernel/_setup_env.sh" 2>/dev/null || true
         set -u
         
+        echo '#!/bin/bash' > "$COMMON_KERNEL_FOLDER/ld-wrapper"
+        echo 'ld.lld "$@" --thinlto-cache-dir=$LDCACHE_DIR --thinlto-jobs=$(nproc --all)' >> "$COMMON_KERNEL_FOLDER/ld-wrapper"
+        chmod +x "$COMMON_KERNEL_FOLDER/ld-wrapper"
+        
         KERNEL_BUILD_DATE=$(date -u)
         export SOURCE_DATE_EPOCH=$COMMIT_TIMESTAMP
         if [ -n "${{ inputs.build_timestamp }}" ]; then
@@ -1524,7 +1600,7 @@ runs:
         echo "EFFECTIVE_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" >> "$GITHUB_ENV"
         export KBUILD_BUILD_USER="${BUILD_USER:-kernel}"
         export KBUILD_BUILD_HOST="${BUILD_HOST:-kleaf}"
-        export KBUILD_BUILD_VERSION=1               
+        export KBUILD_BUILD_VERSION=1
         echo "🔢 SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
         echo "👤 Build user: $KBUILD_BUILD_USER"
         echo "🖥️  Build host: $KBUILD_BUILD_HOST"
@@ -1563,7 +1639,7 @@ runs:
         ccache -s | head -n 20
         echo "============================================"
         
-        make O="$OUT" gki_defconfig
+        make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" gki_defconfig
         
         LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:--OP-WILD}"
         if [ -n "${LOCAL_LOCALVERSION:-}" ]; then
@@ -1573,12 +1649,10 @@ runs:
         fi
         
         if [ "${{ inputs.optimize_level }}" = "O3" ]; then
-          scripts/config --file "$OUT/.config" -d CC_OPTIMIZE_FOR_PERFORMANCE
-          scripts/config --file "$OUT/.config" -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
+          scripts/config --file "$OUT/.config" -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
           KCFLAGS_EXTRA="-O3"
         else
-          scripts/config --file "$OUT/.config" -e CC_OPTIMIZE_FOR_PERFORMANCE
-          scripts/config --file "$OUT/.config" -d CC_OPTIMIZE_FOR_PERFORMANCE_O3
+          scripts/config --file "$OUT/.config" -e CC_OPTIMIZE_FOR_PERFORMANCE -d CC_OPTIMIZE_FOR_PERFORMANCE_O3
           KCFLAGS_EXTRA="-O2"
         fi
 
@@ -1588,25 +1662,12 @@ runs:
             ;;
         esac
         
+        scripts/config --file "$OUT/.config" -e LTO_CLANG -d LTO_CLANG_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL
+        
         case "${{ env.OP_LTO}}" in
-          "none")
-            scripts/config --file "$OUT/.config" -e LTO_CLANG
-            scripts/config --file "$OUT/.config" -e LTO_CLANG_NONE
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_THIN
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_FULL
-            ;;
-          "thin")
-            scripts/config --file "$OUT/.config" -e LTO_CLANG
-            scripts/config --file "$OUT/.config" -e LTO_CLANG_THIN
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_NONE
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_FULL
-            ;;
-          "full")
-            scripts/config --file "$OUT/.config" -e LTO_CLANG
-            scripts/config --file "$OUT/.config" -e LTO_CLANG_FULL
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_NONE
-            scripts/config --file "$OUT/.config" -d LTO_CLANG_THIN
-            ;;
+          "none") scripts/config --file "$OUT/.config" -e LTO_CLANG_NONE ;;
+          "thin") scripts/config --file "$OUT/.config" -e LTO_CLANG_THIN ;;
+          "full") scripts/config --file "$OUT/.config" -e LTO_CLANG_FULL ;;
           *)
             echo "::error::Unsupported LTO option: ${{ env.OP_LTO}}"
             exit 1
@@ -1614,7 +1675,7 @@ runs:
         esac
         
         
-        make O="$OUT" olddefconfig
+        make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" olddefconfig
         
         KCFLAGS="$KCFLAGS -Wno-error -pipe ${KCFLAGS_EXTRA}"
         KCPPFLAGS="$KCPPFLAGS -DCONFIG_OPTIMIZE_INLINING"
@@ -1641,7 +1702,7 @@ runs:
         
         if [ ! -d "$CCACHE_DIR" ] || [ -z "$(find "$CCACHE_DIR" -type f 2>/dev/null | head -n1)" ]; then
           echo "🔥 Priming cache with header preprocessing..."
-          make -C "$COMMON_KERNEL_FOLDER" O="$OUT" headers_install prepare 2>&1 | head -n 20 || true
+          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -C "$COMMON_KERNEL_FOLDER" O="$OUT" headers_install prepare 2>&1 | head -n 20 || true
           echo ""
         fi
         
@@ -1649,8 +1710,8 @@ runs:
         set -o pipefail
         
         if [ "${{ inputs.debug }}" == "true" ]; then
-          make -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image modules 2>&1 | tee build.log
-          make -j"$(nproc --all)" O="$COMMON_KERNEL_FOLDER/out" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" INSTALL_MOD_PATH="$COMMON_KERNEL_FOLDER/out/install" modules_install 2>&1 | tee install.log
+          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image modules 2>&1 | tee build.log
+          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$COMMON_KERNEL_FOLDER/out" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" INSTALL_MOD_PATH="$COMMON_KERNEL_FOLDER/out/install" modules_install 2>&1 | tee install.log
           
           cp build.log "$DEBUG_ARTIFACTS_FOLDER/build.log"
           cp install.log "$DEBUG_ARTIFACTS_FOLDER/install.log"
@@ -1661,7 +1722,7 @@ runs:
           
           ls -la "$DEBUG_ARTIFACTS_FOLDER"
         else
-          make -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image 2>&1 | tee build.log
+          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image 2>&1 | tee build.log
         fi
         
         BUILD_END=$(date +%s)
@@ -1707,8 +1768,24 @@ runs:
         
         export CCACHE_DIR="${{ env.CCACHE_DIR }}"
         
-        echo "ccache Statistics"
-        ccache -s
+        echo "Clear Temporary cache files..."
+        ccache -c
+        
+        echo "Perform cache eviction!"
+        # 3h = 10800s using seconds to support older ccache
+        ccache --evict-older-than 10800s
+        
+        if [ "${{ inputs.debug }}" == "true" ]; then
+          if [ -f "${{ env.CCACHE_LOGFILE }}" ]; then
+            echo "Rename ccache log"
+            LOG_DIR=$(dirname "${{ env.CCACHE_LOGFILE }}")
+            NEW_LOG_NAME="${{ env.OP_MODEL }}_${{ env.OP_OS_VERSION }}_${{ env.KERNEL_FULL_VER }}_ccache.log"
+            mv "${{ env.CCACHE_LOGFILE }}" "$LOG_DIR/$NEW_LOG_NAME"
+            echo "CCACHE_LOGFILE=$LOG_DIR/$NEW_LOG_NAME" >> $GITHUB_ENV
+          else
+            echo "⚠ ccache log not found, skipping rename."
+          fi
+        fi
         
         STATS="$(ccache -s)"
         
@@ -1892,7 +1969,6 @@ runs:
           fi
           if [ "${{ env.OP_SUSFS }}" = true ]; then
             echo "SUSFS Version: ${SUSVER:-unknown}"
-            echo "SUSFS Branch: ${{ env.SUSFS_BRANCH_NAME }}"
             echo "SUSFS commit SHA: $SUSFS_SHA"
           fi
           echo "Optimization: ${{ inputs.optimize_level }}"
@@ -1952,7 +2028,6 @@ runs:
           
           if [ "${{ env.OP_SUSFS }}" = true ]; then
             echo "| **SUSFS Version** | ${SUSVER:-unknown} |"
-            echo "| **SUSFS Branch** | \`${{ env.SUSFS_BRANCH_NAME }}\` |"
             
             if [ "$SUSFS_SHA" != "unknown" ]; then
               echo "| **SUSFS Commit** | [\`${SUSFS_SHA:0:8}\`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/$SUSFS_SHA) |"
@@ -2014,4 +2089,45 @@ runs:
         archive: false
         compression-level: 0
         retention-days: 90
-ion-days: 90
+        retention-days: 90
+
+    - name: Upload ccache log
+      if: success() && inputs.debug == 'true' && steps.build_kernel_step.conclusion == 'success'
+      uses: actions/upload-artifact@v7
+      with:
+        name: "${{ env.OP_MODEL }}_${{ env.OP_OS_VERSION }}_${{ env.KERNEL_FULL_VER }}_ccache.log"
+        path: ${{ env.CCACHE_LOGFILE }}
+        archive: false
+        compression-level: 0
+        retention-days: 90
+
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v6
+      if: always() && steps.build_kernel_step.conclusion == 'success'
+      with:
+        path: main-source
+        fetch-depth: 1
+
+    - name: Save ccache cache
+      if: always() && steps.build_kernel_step.conclusion == 'success'
+      uses: ./action-source/.github/actions/cache/save
+      with:
+        cache_path: ${{ env.CCACHE_DIR }}
+        cache_key: ccache-kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_bucket: "ccache-cache"
+        debug: ${{ inputs.debug }}
+        github_token: ${{ inputs.github_token }}
+        working_dir: "./main-source"
+        compression_level: 6
+
+    - name: Save LTO LD cache
+      if: always() && ${{ env.OP_LTO != 'none' }} && steps.build_kernel_step.conclusion == 'success'
+      uses: ./action-source/.github/actions/cache/save
+      with:
+        cache_path: ${{ env.LDCACHE_DIR }}
+        cache_key: ccache-kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_bucket: "lto-cache"
+        debug: ${{ inputs.debug }}
+        github_token: ${{ inputs.github_token }}
+        working_dir: "./main-source"
+        compression_level: 6
