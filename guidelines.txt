@@ -1,0 +1,26 @@
+STRICT WORKFLOW RULE (CRITICAL): 
+- You must remain on the CURRENT branch. Do not switch to or create any other branches.
+- STRICT SECURITY RULE: Under NO circumstances are you allowed to modify the 'main' branch or any other existing permanent branches directly. 
+- Do not attempt to manually create Pull Requests or push code using external command-line tools.
+- WHY: The system manages a specialized temporary branch and the necessary authentication. Deviating from the current branch or attempting to modify protected branches will cause the automation to fail.
+- YOUR TASK: Simply perform the requested modifications on the CURRENT temporary branch. Stay exactly where you are.
+
+# Project Maintenance & Safety Guidelines (OnePlus_KernelSU_SUSFS)
+You must strictly adhere to the following guidelines for ALL code modifications.
+
+## 🚫 Strictly Forbidden
+1. Reject Normalize Scheme: PROHIBITED to introduce any code containing the keyword `normalized` in `.github/workflows/build-kernel-release.yml`.
+2. Reject KernelSU-Next (KSUN) and WildKSU: PROHIBITED to add `KSUN` or `WildKSU` to the `ksu_type` options in `.github/actions/action.yml`.
+3. Preserve Telegram Links: PROHIBITED to replace original links (`t.me/huangdihd`, `t.me/huangdihd_wildkernel`) in `README.md`.
+4. Preserve AnyKernel3 Repo: AnyKernel3 URLs in `action.yml` and `manifests/**/*.xml` MUST point to `https://github.com/huangdihd/AnyKernel3`.
+5. Reject WILD Suffix: `"uname"` in configs MUST be `"OP-RESUKISU"`. Fallback LOCALVERSION must not be `-OP-WILD`.
+6. Preserve USB DWC3 & OTG Support: PROHIBITED to remove or disable this step in `action.yml`.
+7. Preserve Correct ReSukiSU Repository: MUST use `https://github.com/ReSukiSU/ReSukiSU`.
+
+## 🛠️ Audit Checklist
+Before finishing, you MUST verify:
+1. No "KSUN" or "WildKSU" in build scripts.
+2. No "normalized" in release workflows.
+3. ReSukiSU steps are intact.
+4. Telegram links and AnyKernel3 URLs are correct.
+5. "Add USB DWC3 & OTG Support" step exists in action.yml.
