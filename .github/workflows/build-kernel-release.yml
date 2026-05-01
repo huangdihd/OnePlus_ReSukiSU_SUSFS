@@ -29,18 +29,11 @@ on:
           - android13-5.15
           - android12-5.10
         default: OOS14+15+16
-      ksu_type:
-        description: 'Select KSU Type'
+      ksu_options:
+        description: 'Enter KernelSU build json'
         required: true
-        type: choice
-        options:
-          - ReSukiSU
-          - KSU
-        default: ReSukiSU
-      ksu_branch_or_hash:
-        description: 'KSU branch or commit hash'
         type: string
-        default: 'main'
+        default: '[{"type":"ReSukiSU","hash":"main"}]'
       optimize_level:
         description: "Compiler optimization level"
         required: true
@@ -99,6 +92,7 @@ jobs:
       susfs_hash_android15_6_6:  ${{ steps.set-matrix.outputs.susfs_hash_android15_6_6 }}
       susfs_hash_android16_6_12: ${{ steps.set-matrix.outputs.susfs_hash_android16_6_12 }}
       ksu_resolved_hash:    ${{ steps.set-matrix.outputs.ksu_resolved_hash }}
+      ksu_options_parsed: ${{ steps.set-matrix.outputs.ksu_options_parsed }}
       susfs_base_version: ${{ steps.set-matrix.outputs.susfs_base_version }}
     env:
       GH_TOKEN: ${{ github.token }}
@@ -118,9 +112,14 @@ jobs:
           set -euo pipefail
           echo "::group::Matrix generation"
           
-          input="${{ inputs.op_model }}"
-          ksu_type="${{ inputs.ksu_type }}"
-          ksu_hash="${{ inputs.ksu_branch_or_hash }}"
+          input="${{ github.event.inputs.op_model }}"
+          ksu_options_raw='${{ github.event.inputs.ksu_options }}'
+          if ! ksu_options_parsed=$(echo "$ksu_options_raw" | jq -c 'map(if .type then .type |= ascii_upcase | if .hash == null then if .type == "ReSukiSU" then .hash = "dev" elif .type == "KSU" then .hash = "main" else .hash end else . end else error("No type found") end)' 2>&1); then
+            echo "::error::ksu_options validation failed: $ksu_options_parsed"
+            exit 1
+          fi
+          
+          echo "ksu_options_parsed=$ksu_options_parsed" >> $GITHUB_OUTPUT
           
           echo "[" > matrix.json
           mapfile -t all_json_files < <(find configs/ -name "*.json" -print0 | xargs -0 -n1)
@@ -189,8 +188,10 @@ jobs:
             exit 1
           fi
           
-          # Inject KSU type and hash into every device config
-          merged_matrix=$(jq -n --argjson devices "$filtered" --arg ksu_type "$ksu_type" --arg ksu_hash "$ksu_hash" '[ $devices[] as $dev | ($dev + {ksu_type: $ksu_type, ksu_hash: $ksu_hash}) ]')
+          echo "$filtered" | jq '.' > matrix.json
+          
+          # For each device + each ksu option → one combined entry
+          merged_matrix=$(jq -n --argjson devices "$filtered" --argjson ksu_list "$ksu_options_parsed" '[ $devices[] as $dev | $ksu_list[] as $ksu | ($dev + {ksu_type: $ksu.type, ksu_hash: $ksu.hash}) ]')
           
           final_count=$(echo "$merged_matrix" | jq 'length')
           
@@ -201,8 +202,8 @@ jobs:
           
           echo "count=$count" >> "$GITHUB_OUTPUT"
           
-          ksu_type="${{ inputs.ksu_type }}"
-          ksu_ref="${{ inputs.ksu_branch_or_hash }}"
+          ksu_type=$(echo "$ksu_options_parsed" | jq -r '.[0].type')
+          ksu_ref=$(echo "$ksu_options_parsed" | jq -r '.[0].hash')
           
           if [ "$ksu_type" == "ReSukiSU" ]; then
             KSU_REPO_OWNER="ReSukiSU"
@@ -432,8 +433,8 @@ jobs:
 
       - name: 📊 Build plan summary
         run: |
-          ksu_type="${{ inputs.ksu_type }}"
-          ksu_ref="${{ inputs.ksu_branch_or_hash }}"
+          ksu_type="${{ fromJSON(steps.set-matrix.outputs.ksu_options_parsed)[0].type }}"
+          ksu_ref="${{ fromJSON(steps.set-matrix.outputs.ksu_options_parsed)[0].hash }}"
           
           ksu_display=""
           if [ "$ksu_type" = "ReSukiSU" ] || [ "$ksu_type" = "KSU" ]; then
@@ -539,6 +540,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.set-op-model.outputs.matrix) }}
     outputs:
+      ksun_ver: ${{ steps.build-stat.outputs.ksu_version }}
       ksu_ver: ${{ steps.build-stat.outputs.ksu_version }}
     steps:
       - name: 📥 Checkout Code
@@ -563,17 +565,34 @@ jobs:
           echo "✅ Dependencies installed"
           echo "::endgroup::"
 
-      - name: ♻️ Configure ccache (bounded)
+      - name: Install ccache with ECS by cctv18
+        run: |
+          # Install ccache with ECS by cctv18
+          set -euo pipefail
+          echo "::group::Install ccache with ECS"
+          curl -LfsS --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --tcp-fastopen -H "User-Agent: Mozilla/5.0" "https://github.com/WildKernels/kernel_patches/raw/refs/heads/main/ccache/ccache-x86-64" -o ccache
+          sudo cp -f ./ccache /usr/bin/ccache
+          sudo chmod +x /usr/bin/ccache
+          rm -f ./ccache
+          
+          echo "[DEBUG] Ccache version : $(ccache --version)"
+          echo "::endgroup::"
+
+      - name: ♻️ Configure ccache & LTO cache (bounded)
         run: |
           echo "::group::Configure ccache environment"
           set -euo pipefail
           if command -v ccache >/dev/null 2>&1; then
             CACHE_DIR="${{ github.workspace }}/.ccache"
+            LDCACHE_DIR="${{ github.workspace }}/.ld_cache"
+            CCACHE_LOG="${{ github.workspace }}/ccache.log"
             mkdir -p "$CACHE_DIR"
+            mkdir -p "$LDCACHE_DIR"
             
             SETTINGS=(
               "CCACHE_DIR=$CACHE_DIR"
-              "CCACHE_MAXSIZE=1G"
+              "LDCACHE_DIR=$LDCACHE_DIR"
+              "CCACHE_MAXSIZE=12G"
               "CCACHE_COMPILERCHECK=content"
               "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
               "CCACHE_NOHASHDIR=true"
@@ -583,6 +602,7 @@ jobs:
               "CCACHE_DIRECT=true"
               "CCACHE_FILE_CLONE=true"
               "CCACHE_INODE_CACHE=true"
+              "CCACHE_IS_KERNEL_COMPILING=true"
               "CCACHE_UMASK=002"
               "CCACHE_SLOPPINESS=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale"
             )
@@ -591,6 +611,11 @@ jobs:
               export "$setting"
               echo "$setting" >> "$GITHUB_ENV"
             done
+            
+            if [ "${{ inputs.debug }}" == "true" ]; then
+              export "CCACHE_LOGFILE=$CCACHE_LOG"
+              echo "CCACHE_LOGFILE=$CCACHE_LOG" >> "$GITHUB_ENV"
+            fi
             
             if ccache --help 2>&1 | grep -q 'depend_mode'; then
               export CCACHE_DEPEND=true
@@ -646,13 +671,14 @@ jobs:
             echo "Outputs:"
             echo "  - Kernel: ${{ steps.build.outputs.kernel_version }}"
             if [ "${{ matrix.ksu_type }}" = "ReSukiSU" ]; then
-              echo "  - ReSukiSU: v${{ steps.build.outputs.ksu_version }}"
+              echo "  - KSU Next: v${{ steps.build.outputs.ksu_version }}"
+              echo "ksun_ver=${{ steps.build.outputs.ksu_version }}" >> "$GITHUB_OUTPUT"
+              echo "ksu_ver=" >> "$GITHUB_OUTPUT"
             else
               echo "  - KSU: v${{ steps.build.outputs.ksu_version }}"
+              echo "ksun_ver=" >> "$GITHUB_OUTPUT"
+              echo "ksu_ver=${{ steps.build.outputs.ksu_version }}" >> "$GITHUB_OUTPUT"
             fi
-            
-            echo "ksu_ver=${{ steps.build.outputs.ksu_version }}" >> "$GITHUB_OUTPUT"
-            
             if [ "${{ matrix.susfs }}" = true ]; then
               echo "  - SUSFS: ${{ steps.build.outputs.susfs_version }}"
             fi
@@ -698,7 +724,7 @@ jobs:
           EOF
             if [ "${{ matrix.ksu_type }}" = "ReSukiSU" ]; then
               cat >> $GITHUB_STEP_SUMMARY << EOF
-          | **ReSukiSU** | v${{ steps.build.outputs.ksu_version }} |
+          | **KSU Next** | v${{ steps.build.outputs.ksu_version }} |
           EOF
             else
               cat >> $GITHUB_STEP_SUMMARY << EOF
@@ -769,7 +795,7 @@ jobs:
       REPO_NAME: ${{ github.event.repository.name }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SUSFS_BASE_VERSION: ${{ needs.set-op-model.outputs.susfs_base_version }}
-      RELEASE_NAME: 'OnePlus Kernels With ${{ inputs.ksu_type }} & SUSFS ${{ needs.set-op-model.outputs.susfs_base_version }}'
+      RELEASE_NAME: '*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS ${{ needs.set-op-model.outputs.susfs_base_version }} *TEST BUILD*'
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v6
@@ -834,8 +860,8 @@ jobs:
             fi
           done
           
-          ksu_type="${{ inputs.ksu_type }}"
-          ksu_ref="${{ inputs.ksu_branch_or_hash }}"
+          ksu_type="${{ fromJSON(needs.set-op-model.outputs.ksu_options_parsed)[0].type }}"
+          ksu_ref="${{ fromJSON(needs.set-op-model.outputs.ksu_options_parsed)[0].hash }}"
           ksu_resolved_hash="${{ needs.set-op-model.outputs.ksu_resolved_hash }}"
           
           OPTIMIZE_LEVEL="${{ inputs.optimize_level }}"
@@ -855,7 +881,7 @@ jobs:
             <<< "${{ needs.set-op-model.outputs.active_gki_keys }}"
           
           cat << EOF > release_notes.md
-          # 🎯 OnePlus Kernels with $KSU_TYPE & SUSFS $SUSFS_BASE_VERSION
+          # 🎯 OnePlus Kernels with KernelSU Next & SUSFS $SUSFS_BASE_VERSION
           
           > **Build Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')  
           > **Build ID:** \`${{ github.run_id }}\`  
@@ -954,18 +980,22 @@ jobs:
           }
           
           ksu_display=$(ksu_display_value "$ksu_ref" "$ksu_resolved_hash")
-          if [ "$KSU_TYPE" = "ReSukiSU" ]; then
+          if [ "$ksu_type" == "ReSukiSU" ]; then
             cat << EOF >> release_notes.md
-          | **ReSukiSU Branch/Hash** | \`$KSU_BRANCH\` |
-          | **ReSukiSU Version** | \`$ksu_ver_global\` |
+          | **KernelSU Next Branch** | \`$ksu_display\` |
+          | **KernelSU Next Version** | \`$ksu_ver_global\` |
           EOF
           elif [ "$ksu_type" == "KSU" ]; then
             cat << EOF >> release_notes.md
           | **KernelSU Branch** | \`$ksu_display\` |
           | **KernelSU Version** | \`$ksu_ver_global\` |
           EOF
+          else
+            cat << EOF >> release_notes.md
+          | **Unknown KernelSU Fork Branch** | \`\` |
+          | **Unknown KernelSU Fork Version** | \`\` |
+          EOF
           fi
-          
           cat << EOF >> release_notes.md
           | **SUSFS Version** | \`$SUSFS_BASE_VERSION\` |
           | **Optimization Level** | \`$OPTIMIZE_LEVEL\` |
@@ -988,7 +1018,7 @@ jobs:
           EOF
           if [ "$ksu_type" == "ReSukiSU" ]; then
             cat << EOF >> release_notes.md
-          - **ReSukiSU** - Kernel-based Android Root Solution,forked from sukisu
+          - **KernelSU Next** - Next-generation kernel-level root solution
           EOF
           elif [ "$ksu_type" == "KSU" ]; then
             cat << EOF >> release_notes.md
@@ -998,7 +1028,11 @@ jobs:
           cat << EOF >> release_notes.md
           - **SUSFS $SUSFS_BASE_VERSION** - Advanced hiding and security features
           EOF
-          
+          if [ "$ksu_type" == "ReSukiSU" ] && [ "${ksu_ver_global:-0}" -lt 12884 ]; then
+            cat << EOF >> release_notes.md
+          - **Magic Mount Support** - Seamless file system modifications
+          EOF
+          fi
           if [ "${ksu_ver_global:-0}" -lt 12884 ]; then
             cat << EOF >> release_notes.md
           - **Manual Hooks** - scope_min_manual_hooks_v1.4 for better compatibility
@@ -1043,19 +1077,24 @@ jobs:
           EOF
           if [ "$ksu_type" == "ReSukiSU" ]; then
             cat << EOF >> release_notes.md
-          - **ReSukiSU Manager**  
-            → [Offical Documentation](https://resukisu.github.io/guide/install.html#Get-manager)
+          - **KernelSU Next Manager**  
+            → [GitHub Release](https://github.com/KernelSU-Next/KernelSU-Next/releases)
           EOF
           elif [ "$ksu_type" == "KSU" ]; then
             cat << EOF >> release_notes.md
           - **KernelSU Manager**  
             → [GitHub Release](https://github.com/tiann/KernelSU/releases)
-          ### Required Module
-          - **KSU SUSFS Module** (Required for SUSFS features)  
-            → [GitHub Release](https://github.com/sidex15/ksu_module_susfs/releases)
           EOF
           fi
           cat << EOF >> release_notes.md
+          ### Community Managers
+          - **WildKSU Manager** (Recommended for additional features)  
+            → [GitHub Release](https://github.com/WildKernels/Wild_KSU/releases)
+          
+          ### Required Module
+          - **KSU SUSFS Module** (Required for SUSFS features)  
+            → [GitHub Release](https://github.com/sidex15/ksu_module_susfs/releases)
+          
           ### Recomended Flasher
           - **Kernel Flasher** (Required for flashing AnyKernel3 zips and backups and OTA)  
             → [GitHub Release](https://github.com/fatalcoder524/KernelFlasher/releases)
@@ -1070,17 +1109,22 @@ jobs:
           - Have root access using Magisk / KernelSU / Apatch (Any forks).
           
           ### Via Kernel Flasher
-          1. Download the appropriate ZIP for your device.
-          2. Flash the ZIP file using Kernel Flasher.
-          3. Reboot system.
-          4. Install Manager Application.
+          1. Download the correct AnyKernel3 ZIP for your device.
+          2. If you previously used another root method, clean it up first:
+              a. **Magisk**: perform a complete uninstall **after flashing the AnyKernel3 ZIP**.
+              b. **KSU LKM (boot/init_boot/vendor_boot patched)**: Flash back the stock boot/init_boot/vendor_boot depending on what you patched.
+              c. **KSU GKI**: if you are 100% sure you already flashed stock init_boot/boot/vendor_boot, no action is needed; otherwise, follow the same steps as KSU LKM.
+              d. **APatch**: remove /data/adb contents to avoid leftover root conflicts **after flashing the AnyKernel3 ZIP**.
+          3. Flash the ZIP to the active slot using Kernel Flasher.
+          4. Install the KernelSU-Next Manager APK, same version as mentioned in the AnyKernel3 ZIP name.
+          5. Open the KernelSU-Next app.
+          6. Reboot the device if you performed any cleanup in step 2.
           
           ---
           
           ## 📜 Changelog
           
           ### This Release
-          - Migrated to Action input menu for KSU/ReSukiSU choice.
           - Updated SUSFS to $SUSFS_BASE_VERSION.
           - Added HMBIRD support for all SM8750/MT6991 devices.
           - Improved ccache build system.
@@ -1090,6 +1134,7 @@ jobs:
           - Added Ptrace leak fix for kernels < 5.16.
           - Compiler optimizations (${{ inputs.optimize_level }}).
           - Additional General Optimisations.
+          - Wild_KSU Manager Support.
           - Unicode Bypass Fix
           - Droidspaces Support
           - NTSync Support
@@ -1101,7 +1146,8 @@ jobs:
           
           ## 🙏 Credits
           
-          - **ReSukiSU Team** - Root solution
+          - **KernelSU Next Team** - Root solution
+          - **KernelSU Team** - Root solution
           - **simonpunk** - SUSFS development
           - **OnePlus** - Kernel source code
           - **Community Contributors** - Testing and feedback
@@ -1120,7 +1166,8 @@ jobs:
           gh release create "${{ env.NEW_TAG }}" \
             --repo "${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}" \
             --title "${{ env.RELEASE_NAME }}" \
-            --notes-file release_notes.md
+            --notes-file release_notes.md \
+            --draft
 
       - name: 📤 Upload Release Assets Dynamically
         run: |
@@ -1154,93 +1201,3 @@ jobs:
               echo "- \`$name\` (${size_mb} MB)" >> $GITHUB_STEP_SUMMARY
             fi
           done
-
-      - name: 📱 Send Detailed Telegram Notification
-        if: success()
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: |
-          set -euo pipefail
-          echo "::group::Telegram Notification"
-          
-          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then
-            echo "⚠️ Telegram secrets not configured. Skipping notification."
-            exit 0
-          fi
-          
-          echo "Aggregating artifact statistics..."
-          
-          # Safely read all zip files into an array
-          shopt -s nullglob
-          ZIPS=(./downloaded-artifacts/*.zip)
-          shopt -u nullglob
-          
-          ZIP_COUNT=${#ZIPS[@]}
-          
-          if [ "$ZIP_COUNT" -eq 0 ]; then
-            MODELS="None"
-            OS_VERS="None"
-            KSU_VERS="Unknown"
-          else
-            # Extract models (2nd part), OS versions (3rd part), and KSU versions (6th part) from AK3_OP12_OOS15_android15-6.6_ReSukiSU_30700...zip
-            MODELS=$(printf "%s\n" "${ZIPS[@]}" | awk -F'/' '{print $NF}' | awk -F'_' '{print $2}' | sort -u | paste -sd ", " -)
-            OS_VERS=$(printf "%s\n" "${ZIPS[@]}" | awk -F'/' '{print $NF}' | awk -F'_' '{print $3}' | sort -u | paste -sd ", " -)
-            KSU_VERS=$(printf "%s\n" "${ZIPS[@]}" | awk -F'/' '{print $NF}' | awk -F'_' '{print $6}' | sort -u | paste -sd ", " -)
-          fi
-          
-          echo "Found $ZIP_COUNT packages for models: $MODELS, KSU Ver: $KSU_VERS"
-          
-          # Use pure Bash multi-line string. True newlines are preserved!
-          MSG_TEXT="🚀 <b>OnePlus Kernel Build Successful!</b>
-          ━━━━━━━━━━━━━━━━━━
-          <b>🏷️ Release Tag:</b> <code>${{ env.NEW_TAG }}</code>
-          <b>🔐 Root Solution:</b> ${{ inputs.ksu_type }} (v${KSU_VERS})
-          <b>🛡️ SUSFS Version:</b> ${{ env.SUSFS_BASE_VERSION }}
-          <b>⚙️ Optimization:</b> ${{ inputs.optimize_level }} | Clean: ${{ inputs.clean_build }}
-          ━━━━━━━━━━━━━━━━━━
-          <b>📦 Total Packages:</b> ${ZIP_COUNT} zips
-          <b>📱 Supported Models:</b> ${MODELS}
-          <b>💻 Supported OS:</b> ${OS_VERS}
-          
-          ━━━━━━━━━━━━━━━━━━
-          👉 <a href=\"${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }}\"><b>📥 GET YOUR KERNEL HERE</b></a>
-          📢 <a href=\"https://t.me/huangdihd_wildkernel\"><b>JOIN TELEGRAM CHANNEL</b></a>"
-          
-          # Split TG_CHAT_ID by comma or space
-          IFS=' ,' read -r -a CHAT_IDS <<< "$TG_CHAT_ID"
-          
-          for ID in "${CHAT_IDS[@]}"; do
-            if [ -z "$ID" ]; then continue; fi
-            echo "Constructing secure JSON payload for Chat ID: $ID..."
-            
-            # jq automatically escapes the true newlines and HTML characters into a safe JSON string
-            PAYLOAD=$(jq -n \
-              --arg chat_id "$ID" \
-              --arg text "$MSG_TEXT" \
-              '{
-                chat_id: $chat_id,
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-                text: $text
-              }')
-            
-            echo "Sending POST request to Telegram API (Chat ID: $ID)..."
-            
-            # Send payload as application/json
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD")
-            
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
-
-            if [ "$HTTP_CODE" -eq 200 ]; then
-              echo "✅ Detailed Telegram notification sent successfully to $ID! response: $RESPONSE_BODY"
-            else
-              echo "❌ Failed to send Telegram notification to $ID! status code: $HTTP_CODE, response: $RESPONSE_BODY"
-              # We don't necessarily want to exit if one ID fails, but we should log it.
-              # However, if it's the only ID, maybe we should? Let's keep it robust.
-            fi
-          done
-          echo "::endgroup::"
