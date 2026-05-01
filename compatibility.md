@@ -9,7 +9,7 @@
 </table>
 
  - Currently All the kernels are built from Android 15 Manifest.
- - Do not use the zips after Major Android OTA (a15 -> a16) unless its verified in <a href="https://t.me/huangdihd_wildkernel">WildKernels</a> Telegram group or other sources like XDA.
+ - Do not use the zips after Major Android OTA (a15 -> a16) unless its verified in <a href="https://t.me/WildKernels">WildKernels</a> Telegram group or other sources like XDA.
 
 ## 2. Non-OnePlus Devices
 ### List of verified devices 
@@ -21,7 +21,7 @@
 </table>
 
  - If your device is not in list, please select the device which is most similar and matches the kernel version (androidXX-YY.ZZ.AAA). AAA must be atleast same or greater. XX-YY.ZZ must match exactly. More Information on this can be read @<a href="https://kernelsu.org/guide/installation.html#kmi">KernelSU.org</a>.
- - Thanks to our community users at <a href="https://t.me/huangdihd_wildkernel">WildKernels</a> for helping us compile the list.
+ - Thanks to our community users at <a href="https://t.me/WildKernelsTG">WildKernels</a> for helping us compile the list.
  - We request more users come forward help us keep the list updated. 
  - I'm sure more devices from other brands are also supported.
 <table>
