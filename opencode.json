@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "custom-openai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Custom OpenAI Provider",
+      "options": {
+        "baseURL": "https://api.siliconflow.cn/v1",
+        "apiKey": "sk-ihfmdbmqvoimncdsgcjguoncadqgyyoignoaqfcbrcmfzcfi",
+        "headers": {
+          "Authorization": "Bearer sk-ihfmdbmqvoimncdsgcjguoncadqgyyoignoaqfcbrcmfzcfi"
+        }
+      },
+      "models": {
+        "Pro/zai-org/GLM-5.1": {
+          "name": "Custom Model"
+        }
+      }
+    }
+  }
+}
