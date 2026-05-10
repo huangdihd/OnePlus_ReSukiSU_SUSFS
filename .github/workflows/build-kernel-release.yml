@@ -787,16 +787,10 @@ jobs:
     needs: [set-op-model, build]
     runs-on: ubuntu-latest
     if: |
-<<<<<<< HEAD
-      always() && 
-      needs.build.result == 'success' && 
-      inputs.make_release == true
-=======
       !cancelled() &&
       inputs.make_release == true &&
       needs.build.result == 'success' &&
       needs.set-op-model.result == 'success'
->>>>>>> upstream/main
     env:
       REPO_OWNER: ${{ github.repository_owner }}
       REPO_NAME: ${{ github.event.repository.name }}
