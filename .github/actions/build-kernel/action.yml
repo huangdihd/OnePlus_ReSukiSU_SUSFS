@@ -1083,7 +1083,7 @@ runs:
             echo "Added missing #include <linux/zswap.h> to mm/memory.c"
           fi
         else
-          # Patch context expects: perf_event.h, ptrace.h, vmalloc.h
+          # Patch context expects: perf_event.h, ptrace.h, vmalloc.h, trace/hooks/mm.h
           if ! grep -q '#include <linux/perf_event.h>' ./mm/memory.c; then
             sed -i '/#include <linux\/vmalloc.h>/i #include <linux\/perf_event.h>' ./mm/memory.c
             echo "Added missing #include <linux/perf_event.h> to mm/memory.c"
@@ -1091,6 +1091,10 @@ runs:
           if ! grep -q '#include <linux/ptrace.h>' ./mm/memory.c; then
             sed -i '/#include <linux\/perf_event.h>/a #include <linux\/ptrace.h>' ./mm/memory.c
             echo "Added missing #include <linux/ptrace.h> to mm/memory.c"
+          fi
+          if ! grep -q '#include <trace/hooks/mm.h>' ./mm/memory.c; then
+            sed -i '/#include <linux\/vmalloc.h>/a #include <trace\/hooks\/mm.h>' ./mm/memory.c
+            echo "Added missing #include <trace/hooks/mm.h> to mm/memory.c"
           fi
         fi
         
