@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "custom-openai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Custom OpenAI Provider",
+      "options": {
+        "baseURL": "https://token-plan-cn.xiaomimimo.com/v1",
+        "apiKey": "tp-cfi9rncs81x7b66clusnmu04c4l8klspyvb3zeeemezgrvqa"
+      },
+      "models": {
+        "mimo-v2.5-pro": {
+          "name": "Custom Model"
+        }
+      }
+    }
+  }
+}
