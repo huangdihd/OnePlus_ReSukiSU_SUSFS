@@ -22,11 +22,10 @@ on:
         options:
           - ALL
           # Kernel Versions
+          - android16-6.12
           - android15-6.6
           - android14-6.1
-          - android14-5.15
           - android13-5.15
-          - android13-5.10
           - android12-5.10
           # OnePlus Phones
           - OP15T
@@ -73,6 +72,8 @@ on:
           - OP-ACE
           # OnePlus Tablets & Others
           - OP-OPEN
+          - OP-PAD-4
+          - OP-PAD-3-PRO
           - OP-PAD-3-SM8750
           - OP-PAD-3-MT6897
           - OP-PAD-2-PRO
@@ -81,6 +82,7 @@ on:
           - OP-PAD-PRO
           - OP-PAD-MT6983
           - OP-PAD-LITE
+          - OP-PAD-GO
           - OP-PAD-GO-2
       
       cache_pattern:

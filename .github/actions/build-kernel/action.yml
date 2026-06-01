@@ -1743,6 +1743,16 @@ runs:
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
         EOF
         
+        if [ "${{ env.OP_RUST_BUILD }}" = "true" ]; then
+          echo "Add IPC NS missing symbols for rust binder"
+          if ! grep -q 'EXPORT_SYMBOL.*put_ipc_ns' "$COMMON_KERNEL_FOLDER/ipc/namespace.c"; then
+            echo -e '\nEXPORT_SYMBOL_GPL(put_ipc_ns);' >> "$COMMON_KERNEL_FOLDER/ipc/namespace.c"
+          fi
+          if ! grep -q 'EXPORT_SYMBOL.*init_ipc_ns' "$COMMON_KERNEL_FOLDER/ipc/msgutil.c"; then
+            echo -e '\nEXPORT_SYMBOL_GPL(init_ipc_ns);' >> "$COMMON_KERNEL_FOLDER/ipc/msgutil.c"
+          fi
+        fi
+        
         echo "✅ Droidspaces Support applied"
         echo "::endgroup::"
 
@@ -1766,10 +1776,7 @@ runs:
         set -euo pipefail
         echo "Add Build based configs"
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_ANDROID_BINDER_IPC_RUST=y
-        CONFIG_CMDLINE="module_blacklist=rust_binder"
-        CONFIG_CMDLINE_EXTEND=y
-        CONFIG_CMDLINE_FORCE=n
+        CONFIG_ANDROID_BINDER_IPC_RUST=m
         CONFIG_RUST=y
         EOF
     
