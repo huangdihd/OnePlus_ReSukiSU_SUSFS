@@ -1,17 +1,433 @@
 The following files have UNRESOLVED MERGE CONFLICTS. Conflict markers are at these exact lines:
 
 === .github/actions/build-kernel/action.yml ===
-1242:<<<<<<< HEAD
-1249:=======
-1259:>>>>>>> upstream/main
-1940:        echo "============================================"
-1942:        echo "============================================"
-1958:        echo "============================================"
-2001:        echo "============================================"
-2003:        echo "============================================"
-2019:        echo "============================================"
-2065:        echo "============================================"
-2067:        echo "============================================"
-2073:          echo "============================================"
-2076:        echo "============================================"
+1244:<<<<<<< HEAD
+1246:=======
+1248:>>>>>>> upstream/main
+1254:<<<<<<< HEAD
+1260:=======
+1262:>>>>>>> upstream/main
+1474:<<<<<<< HEAD
+1476:=======
+1478:>>>>>>> upstream/main
+1947:        echo "============================================"
+1949:        echo "============================================"
+1965:        echo "============================================"
+2008:        echo "============================================"
+2010:        echo "============================================"
+2026:        echo "============================================"
+2072:        echo "============================================"
+2074:        echo "============================================"
+2080:          echo "============================================"
+2083:        echo "============================================"
+
+=== configs/oos15/OP-ACE-2-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-2-PRO-5.15.149.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-2V-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-3-5.15.149.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-3-PRO-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-3V-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-5-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-5-PRO-6.6.30.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-5-ULTRA-6.6.50.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-ACE-RACE-5.10.226.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-NORD-3-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-NORD-4-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-NORD-4-CE-5.15.167.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-OPEN-5.15.149.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-2-PRO-6.6.30.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-2-SM8650-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-3-MT6897-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-3-SM8750-6.6.30.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-MT6983-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP-PAD-PRO-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP10pro-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP10t-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP11-5.15.149.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP11r-5.10.209.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP12-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP12r-5.15.149.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP13-CPH-6.6.56.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP13T-6.6.56.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos15/OP13r-6.1.75.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-ACE-3-5.15.167.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-ACE-3V-6.1.118.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-ACE-5-6.1.118.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-NORD-4-6.1.118.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-NORD-5-6.1.118.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP-OPEN-5.15.167.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP11-5.15.167.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP12-6.1.118.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== configs/oos16/OP12r-5.15.167.json ===
+25:<<<<<<< HEAD
+27:=======
+29:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_10_pro_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_10t_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_11_5.15.149_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+19:<<<<<<< HEAD
+21:=======
+23:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_11r_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_12_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_12r_5.15.149_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_13_6.6.30_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_13_global_6.6.56_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_13r_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_13t_6.6.56_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace2_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace2_pro_5.15.149_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace2v_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace3_5.15.149_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace3_pro_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+21:<<<<<<< HEAD
+23:=======
+25:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace5_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace5_pro_6.6.30_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace5_ultra_6.6.50_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace_3v_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_ace_race_5.10.226_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+19:<<<<<<< HEAD
+21:=======
+23:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_nord_3_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_nord_4_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_nord_ce4_5.15.167_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_open_5.15.149_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad2_sm8650_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+21:<<<<<<< HEAD
+23:=======
+25:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad_2_pro_6.6.30_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad_3_mt6897_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad_3_sm8750_6.6.30_v.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad_mt6983_5.10.209_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos15/oneplus_pad_pro_6.1.75_v.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+21:<<<<<<< HEAD
+23:=======
+25:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_11_5.15.167_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_12_6.1.118_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_12r_5.15.167_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_ace3_5.15.167_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_ace5_6.1.118_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_ace_3v_6.1.118_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_nord_4_6.1.118_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_nord_5_6.1.118_w.xml ===
+5:<<<<<<< HEAD
+8:=======
+11:>>>>>>> upstream/main
+
+=== manifests/oos16/oneplus_open_5.15.167_w.xml ===
+6:<<<<<<< HEAD
+9:=======
+12:>>>>>>> upstream/main
 
