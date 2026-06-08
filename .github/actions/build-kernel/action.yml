@@ -1246,6 +1246,10 @@ runs:
             *)
               FENGCHI_DIR="$KERNEL_PATCHES_FOLDER/oneplus/hmbird" ;;
           esac
+          case "$OP_MODEL" in
+            OP13-PJZ*)
+              HMBIRD_MODEL="OP13" ;;
+          esac
           dos2unix "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${OP_OS_VERSION}.patch"
           if ! patch -p1 --fuzz=2 < "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${OP_OS_VERSION}.patch"; then
             echo "::warning::hmbird fengchi patch did not apply cleanly. Continuing without it."
