@@ -107,6 +107,23 @@ runs:
           echo "Archive created: $FILENAME ($FILE_SIZE bytes)"
           echo "::endgroup::"
           
+          ASSETS_URL="https://github.com/${TARGET_REPO}/releases/expanded_assets/$TAG_NAME"
+          echo "::group:: Fetching Asset List"
+          HTTP_RESPONSE=$(curl -sL -A "Mozilla/5.0" -w "%{http_code}" "$ASSETS_URL" -o assets.html || echo "404")
+          
+          if [ "$HTTP_RESPONSE" -eq 200 ]; then
+            ALL_ASSETS=$(grep -oP "download/$TAG_NAME/\K[^\"' ]+" assets.html | sort || echo "")
+            if [ "${{ inputs.debug }}" = "true" ]; then
+              echo "Assets Found: $ALL_ASSETS"
+            fi
+          else
+            echo "Status $HTTP_RESPONSE: Failed to fetch assets from scraper endpoint."
+            ALL_ASSETS=""
+          fi
+          rm -f assets.html
+          
+          echo "::endgroup::"
+          
           echo "::group:: Uploading Assets"
           MAX_SIZE=2000000000 # ~1.86GB
           
@@ -137,6 +154,32 @@ runs:
           if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
             echo "⚠ File > 2GB. Splitting..."
             split -b 1500M -a 2 "$FILENAME" "${FILENAME}.part"
+            
+            NEW_PARTS=(${FILENAME}.part*)
+            NEW_PARTS_COUNT=${#NEW_PARTS[@]}
+            
+            if echo "$ALL_ASSETS" | grep -xF "${FILENAME}" >/dev/null 2>&1; then
+              echo "Removing old single asset to make way for split parts: ${FILENAME}"
+              gh release delete-asset "$TAG_NAME" "${FILENAME}" --repo "$TARGET_REPO" -y || true
+            fi
+            
+            OLD_PARTS=$(echo "$ALL_ASSETS" | grep -F "${FILENAME}.part" || echo "")
+            
+            if [ -n "$OLD_PARTS" ]; then
+              OLD_PARTS_COUNT=$(echo "$OLD_PARTS" | wc -l)
+            else
+              OLD_PARTS_COUNT=0
+            fi
+            
+            if [ "$OLD_PARTS_COUNT" -gt "$NEW_PARTS_COUNT" ]; then
+              echo "Old build had $OLD_PARTS_COUNT parts, new has $NEW_PARTS_COUNT. Cleaning up excess parts..."
+              EXT_PARTS=$(echo "$OLD_PARTS" | awk -v skip="$NEW_PARTS_COUNT" 'NR>skip')
+              for asset in $EXT_PARTS; do
+                echo "Removing leftover trailing part: $asset"
+                gh release delete-asset "$TAG_NAME" "$asset" --repo "$TARGET_REPO" -y || true
+              done
+            fi
+            
             for part in "${FILENAME}".part*; do
               echo "Uploading $part..."
               if ! upload_with_retry "$part"; then
@@ -147,6 +190,16 @@ runs:
             done
             rm -rf "$FILENAME"
           else
+            OLD_PARTS=$(echo "$ALL_ASSETS" | grep -F "${FILENAME}.part" || echo "")
+            if [ -n "$OLD_PARTS" ]; then
+              echo "New build shrunk to single file. Cleaning up old split parts for ${FILENAME}..."
+              while read -r asset; do
+                [ -z "$asset" ] && continue
+                echo "Removing ghost split part: $asset"
+                gh release delete-asset "$TAG_NAME" "$asset" --repo "$TARGET_REPO" -y || true
+              done <<< "$OLD_PARTS"
+            fi
+            
             echo "Uploading $FILENAME..."
             if ! upload_with_retry "$FILENAME"; then
               echo "::error::Failed to upload $FILENAME after multiple attempts."
