@@ -1,5 +1,5 @@
-name: 'Build OnePlus Kernel with KernelSU / ReSukiSU'
-description: 'GitHub Action to build OnePlus kernels with original KernelSU or ReSukiSU, and SUSFS integration, optimized for performance and reliability'
+name: 'Build OnePlus Kernel with KernelSU Next'
+
 inputs:
   op_config_json:
     description: 'JSON string containing full device config'
@@ -10,8 +10,8 @@ inputs:
     required: true
     type: choice
     options:
+      - KSUN
       - KSU
-      - ReSukiSU
   ksu_branch_or_hash:
     description: 'KSU branch or commit hash (empty = auto-detect by ksu_type)'
     required: false
@@ -128,8 +128,10 @@ runs:
         os_version="$OP_OS_VERSION"
         hmbird="$OP_HMBIRD"
         susfs="$OP_SUSFS"
+        opt="$OP_OPT"
         bbg="$OP_BBG"
         bbr="$OP_BBR"
+        bbr3="$OP_BBR3"
         ttl="$OP_TTL"
         ip_set="$OP_IP_SET"
         rust_build="$OP_RUST_BUILD"
@@ -196,8 +198,8 @@ runs:
         
         if [[ -z "$os_version" ]]; then
           errors+=("Input 'os_version' cannot be empty")
-        elif [[ ! "$os_version" =~ ^OOS ]]; then
-          errors+=("Input 'os_version' does not start with 'OOS'. Got: '$os_version'")
+        elif [[ ! "$os_version" =~ ^A ]]; then
+          errors+=("Input 'os_version' does not start with 'A'. Got: '$os_version'")
         fi
         
         if [[ -z "$hmbird" ]]; then
@@ -212,6 +214,12 @@ runs:
           errors+=("Input 'susfs' contains invalid characters. Allowed: 'true' or 'false'. Got: '$susfs'")
         fi
         
+        if [[ -z "$opt" ]]; then
+          errors+=("Input 'opt' cannot be empty")
+        elif [[ "$opt" != "true" && "$opt" != "false" ]]; then
+          errors+=("Input 'opt' contains invalid characters. Allowed: 'true' or 'false'. Got: '$opt'")
+        fi
+        
         if [[ -z "$bbg" ]]; then
           errors+=("Input 'bbg' cannot be empty")
         elif [[ "$bbg" != "true" && "$bbg" != "false" ]]; then
@@ -222,6 +230,12 @@ runs:
           errors+=("Input 'bbr' cannot be empty")
         elif [[ "$bbr" != "true" && "$bbr" != "false" ]]; then
           errors+=("Input 'bbr' contains invalid characters. Allowed: 'true' or 'false'. Got: '$bbr'")
+        fi
+        
+        if [[ -z "$bbr3" ]]; then
+          errors+=("Input 'bbr3' cannot be empty")
+        elif [[ "$bbr3" != "true" && "$bbr3" != "false" ]]; then
+          errors+=("Input 'bbr3' contains invalid characters. Allowed: 'true' or 'false'. Got: '$bbr3'")
         fi
         
         if [[ -z "$ttl" ]]; then
@@ -342,6 +356,7 @@ runs:
         KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
         SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
         KSU_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
+        KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU-Next"
         mkdir -p "$ARTIFACTS_DIR"
         mkdir -p "$DEBUG_ARTIFACTS_DIR"
         
@@ -356,6 +371,7 @@ runs:
         echo "KERNEL_PATCHES_FOLDER=$KERNEL_PATCHES_DIR" >> "$GITHUB_ENV"
         echo "SUSFS_FOLDER=$SUSFS_DIR" >> "$GITHUB_ENV"
         echo "KSU_FOLDER=$KSU_DIR" >> "$GITHUB_ENV"
+        echo "KSUN_FOLDER=$KSUN_DIR" >> "$GITHUB_ENV"
         
         DEBUG_ZIP_NAME="debug_${OP_MODEL}_${OP_OS_VERSION}.zip"
         echo "DEBUG_ZIP_NAME=$DEBUG_ZIP_NAME" >> "$GITHUB_ENV"
@@ -663,7 +679,6 @@ runs:
     - name: Restore ccache cache
       id: restore-ccache-cache
       uses: ./action-source/.github/actions/cache/restore
-      continue-on-error: true
       if: ${{ inputs.clean == false || inputs.clean == 'false' }}
       with:
         cache_path: ${{ env.CCACHE_DIR }}
@@ -673,20 +688,6 @@ runs:
         restore_keys: |
           ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
           ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
-
-    - name: Restore LTO LD cache
-      id: restore-lto-ld-cache
-      uses: ./action-source/.github/actions/cache/restore
-      continue-on-error: true
-      if: ${{ (inputs.clean == false && env.OP_LTO != 'none') || (inputs.clean == 'false' && env.OP_LTO != 'none') }}
-      with:
-        cache_path: ${{ env.LDCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
-        cache_bucket: "lto-cache"
-        debug: ${{ inputs.debug }}
-        restore_keys: |
-          ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
-          ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
 
     - name: Check and Prepare Caches
       shell: bash
@@ -699,7 +700,7 @@ runs:
         echo "Current ccache configuration:"
         ccache -p
         
-        if [ -d "$CCACHE_DIR" ] && find "$CCACHE_DIR" -type f -print -quit 2>/dev/null | grep -q .; then
+        if [ -d "$CCACHE_DIR" ] && find "$CCACHE_DIR" -maxdepth 2 -type f -print -quit 2>/dev/null | grep -q .; then
           echo "✅ Restored cache found"
           echo ""
           echo "Pre-build cache statistics:"
@@ -713,16 +714,18 @@ runs:
         fi
         
         ccache -z
+        rm -f "$CCACHE_DIR/ccache.log"
         
-        # Setup and check LTO Cache
-        if [ -d "$LDCACHE_DIR" ] && find "$LDCACHE_DIR" -type f -print -quit 2>/dev/null | grep -q .; then
-          echo "✅ Restored LTO LD cache found"
-          
-          echo "Updating LTO cache atime for cache eviction..."
-          find ${{ env.LDCACHE_DIR }} -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} +
+        # Blacklist Risky files from ccache
+        sed -i '1i // CI_RUN_ID: ${{ github.run_id }}' "$COMMON_KERNEL_FOLDER/kernel/configs.c"
+        sed -i '1i // ccache:disable' "$COMMON_KERNEL_FOLDER/kernel/configs.c"
+
+        if head -n 1 "$COMMON_KERNEL_FOLDER/kernel/configs.c" | grep -q "// ccache:disable"; then
+            echo "Success: ccache is disabled for this file!"
         else
-          echo "⚠️ No existing LTO cache - linker will generate new artifacts"
+            echo "Error: Modification failed or line is missing."
         fi
+
         echo "::endgroup::"
 
     - name: Fetch SusFS and Other Dependencies
@@ -846,29 +849,6 @@ runs:
           echo "💥 All attempts failed"
           return 1
         }
-
-        retry_download() {
-          local url="$1"
-          local file_name="$2"
-          local max_attempts=3
-          local attempt=1
-          
-          while [ $attempt -le $max_attempts ]; do
-            echo "🔄 Attempt $attempt/$max_attempts: downloading $url"
-            
-            wget "$url" -O "$file_name" && {
-              echo "✅ Success"
-              return 0
-            }
-            
-            echo "❌ Failed, cleaning up..."
-            rm -f "$file_name" 2>/dev/null
-            sleep $((attempt++ * 5))
-          done
-          
-          echo "💥 All attempts failed"
-          return 1
-        }
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
         
@@ -893,6 +873,67 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         echo "::endgroup::"
 
+    - name: Add KernelSU Next
+      shell: bash
+      if: ${{ inputs.ksu_type == 'KSUN' }}
+      run: |
+        set -euo pipefail
+        echo "::group::Add KernelSU Next"
+        cd "$KERNEL_PLATFORM_FOLDER"
+        echo "Adding KernelSU Next..."
+        KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
+        if [ -z "$KSU_INPUT" ]; then
+          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+        else
+          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
+        fi
+        git submodule update --init --recursive
+        cd KernelSU-Next/kernel
+        
+        COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
+        
+        if [ $COMMITS_COUNT -lt 2684 ]; then
+          BASE_VERSION=10200
+        else
+          BASE_VERSION=30000
+        fi
+        
+        KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
+        sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
+        
+        if [ -f ksu.c ]; then
+          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        fi
+        
+        if [[ "$KSU_VERSION" -gt 33095 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
+          sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
+          sed -i 's|$(src)|$(abspath $(src))|' Kbuild
+          sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
+        fi
+        
+        if [ "$KSU_VERSION" -lt 12884 ]; then
+          echo "NEED_HOOKS=true" >> $GITHUB_ENV
+        else
+          echo "NEED_HOOKS=false" >> $GITHUB_ENV
+        fi
+        
+        cd ..
+        KSU_COMMIT_SHA=$(git rev-parse HEAD)
+        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
+        
+        
+        echo "Add KSUN Configuration Settings"
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        CONFIG_KSU=y
+        CONFIG_KSU_KPROBES_HOOK=n
+        EOF
+        
+        echo "KSUN" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KernelSU Next Version: $KSU_VERSION"
+        echo "✅ KernelSU Next added (commit: ${KSU_COMMIT_SHA:0:8})"
+        echo "::endgroup::"
 
     - name: Add KernelSU
       shell: bash
@@ -908,24 +949,14 @@ runs:
         else
           curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "$KSU_INPUT"
         fi
-        
         git submodule update --init --recursive
         cd KernelSU/kernel
         BASE_VERSION=30000
         KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
-        
-        if grep -q "DKSU_VERSION=16" Makefile; then
-          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" Makefile
-        fi
+        sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
         if [ -f ksu.c ]; then
-          echo "ℹ️ Found ksu.c, applying legacy stackprotector patch..."
           sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
-        elif [ -f core.c ]; then
-          echo "ℹ️ Found core.c, applying stackprotector patch to new structure..."
-          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' core.c
-        else
-          echo "ℹ️ Modern KSU structure detected, skipping legacy stackprotector patch."
         fi
         
         if [[ "$KSU_VERSION" -gt 32427 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
@@ -950,39 +981,6 @@ runs:
         echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
         echo "KernelSU Version: $KSU_VERSION"
         echo "✅ KernelSU added (commit: ${KSU_COMMIT_SHA:0:8})"
-        echo "::endgroup::"
-
-    - name: Add ReSukiSU (The Sukisaku Project)
-      shell: bash
-      if: ${{ inputs.ksu_type == 'ReSukiSU' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Add ReSukiSU"
-        cd "$KERNEL_PLATFORM_FOLDER"
-        echo "Adding ReSukiSU..."
-        
-        if [ "${{ inputs.ksu_branch_or_hash }}" = "" ]; then
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -
-        else
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s "${{ inputs.ksu_branch_or_hash }}"
-        fi
-        
-        cd KernelSU
-        
-        BASE_VERSION=30700
-        KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
-        
-        KSU_COMMIT_SHA=$(git rev-parse HEAD)
-        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
-        
-        cd ..
-        
-        echo "ReSukiSU" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-        
-        echo "ReSukiSU Version: $KSU_VERSION"
-        echo "✅ ReSukiSU added (commit: ${KSU_COMMIT_SHA:0:8})"
         echo "::endgroup::"
 
     - name: Apply SUSFS Patches
@@ -1014,27 +1012,96 @@ runs:
         
         case "$susfs_version" in
           "v1.5.8")
-            if [ "${{ inputs.ksu_type }}" = "KSU" ]; then
-              cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              patch -p1 --forward --fuzz=3 < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_apk_sign.c.patch"
+              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_core_hook.c.patch"
+              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_selinux.c.patch"
+              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_ksud.c.patch"
             else
-              echo "ℹ️ Skipping KernelSU folder patch for ReSukiSU"
+              cd "$KSU_FOLDER"
+              patch -p1 --forward --fuzz=3 < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
             fi
             ;;
-          "v1.5.9"|"v1.5.10"|"v1.5.11"|"v1.5.12"|"v2.0.0"|"v2.1.0")
-            if [ "${{ inputs.ksu_type }}" = "KSU" ]; then
+          "v1.5.9"|"v1.5.10"|"v1.5.11"|"v1.5.12")
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              cd "$KSUN_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -printf "%f\n" | cut -d'.' -f1); do
+                echo "Patching file: $file.c with fix_$file.c.patch"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.c.patch"
+              done
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_kernel_compat.c.patch"
+            else
+              cd "$KSU_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+            fi
+            ;;
+          "v2.0.0")
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              cd "$KSUN_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
+                echo "Patching file: $file with fix_$file.patch"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
+              done
+              echo "Patching Hook Mode!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
+              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+              if [ "$KSUVER" -le 33095 ]; then
+                echo "Patching Multi-manager Support for SusFS kernel!"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_manager.patch"
+              fi
+              if [ "$KSUVER" -ge 33068 ] && [ "$KSUVER" -lt 33070 ]; then
+                echo "Patching Multi-manager sepolicy Support for SusFS kernel!"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_sepolicy_fix.patch"
+              fi
+            else
               cd "$KSU_FOLDER"
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+            fi
+            ;;
+          "v2.1.0")
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              cd "$KSUN_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
+                echo "Patching file: $file with fix_$file.patch"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
+              done
+              echo "Patching Hook Mode!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
+              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+              if [ "$KSUVER" -le 33095 ]; then
+                echo "Patching Multi-manager Support for SusFS kernel!"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_manager.patch"
+              fi
+              if [ "$KSUVER" -ge 33068 ] && [ "$KSUVER" -lt 33070 ]; then
+                echo "Patching Multi-manager sepolicy Support for SusFS kernel!"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_sepolicy_fix.patch"
+              fi
             else
-              echo "ℹ️ Skipping KernelSU folder patch for ReSukiSU"
+              cd "$KSU_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
             ;;
           "v2.2.0")
-            if [ "${{ inputs.ksu_type }}" = "KSU" ]; then
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              cd "$KSUN_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
+                echo "Patching file: $file with fix_$file.patch"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
+              done
+              echo "Patching Hook Mode!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
+              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+            else
               cd "$KSU_FOLDER"
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-            else
-              echo "ℹ️ Skipping KernelSU folder patch for ReSukiSU"
             fi
             ;;
           *)
@@ -1107,30 +1174,7 @@ runs:
           fi
         fi
         
-        echo "Applying SUSFS patch..."
-        # Attempt to apply the patch; enter error handling if it doesn't apply cleanly
-        if ! patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${{ env.SUSFS_KERNEL_BRANCH }}.patch"; then
-          echo "Patch reported errors. Checking for known mm/memory.c Hunk #1 context mismatch..."
-          
-          # If mm/memory.c.rej exists and is caused by the SUSFS macro insertion failure
-          if [ -f mm/memory.c.rej ] && grep -q 'CONFIG_KSU_SUSFS_SUS_MAP' mm/memory.c.rej; then
-            echo "Manually injecting SUSFS headers into mm/memory.c..."
-            # Bypass context checks and forcefully inject the code right below vmalloc.h
-            sed -i '/#include <linux\/vmalloc.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n#include <linux\/susfs_def.h>\n#endif \/\/ #ifdef CONFIG_KSU_SUSFS_SUS_MAP' mm/memory.c
-            
-            # We have manually fixed Hunk #1, so safely remove this reject file
-            rm mm/memory.c.rej
-          fi
-        
-          # Check again for other real errors (unhandled .rej files, e.g., in avc.c)
-          if [ -n "$(find . -name "*.rej")" ]; then
-            echo "::error::SUSFS patch failed. Dumping all remaining .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          else
-            echo "Patch applied successfully with manual fallback for mm/memory.c!"
-          fi
-        fi
+        patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${{ env.SUSFS_KERNEL_BRANCH }}.patch"
         
         # Revert Fake kernel patch
         if [ "$fake_patched_expand" = 1 ]; then
@@ -1173,7 +1217,7 @@ runs:
           fi
         fi
         echo "✅ SUSFS patches applied"
-
+        
         echo "Add SUSFS Configuration Settings"
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_KSU_SUSFS=y
@@ -1196,7 +1240,7 @@ runs:
         EOF
         
         echo "::endgroup::"
-        
+
     - name: Add BBG
       if: ${{ env.OP_BBG == 'true' }}
       shell: bash
@@ -1211,14 +1255,13 @@ runs:
         echo "CONFIG_BBG=y" >> common/arch/arm64/configs/gki_defconfig
         sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' common/security/Kconfig
         
-        if grep -qxF $'\t\tconst char* symlink_target_link = inode->i_op->get_link(dentry, inode, NULL);' ./Baseband-guard/baseband_guard.c; then
-          echo "Applying BBG get_link fix"
-          if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/experimental/bbg/bbg_fix_get_link.patch"; then
-            echo "::error::BBG get_link patch failed. Dumping all .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          fi
-        fi
+        case "$OP_BRANCH" in
+          wild/sm8850|wild/sm8845)
+            echo "Applying BBG efisp abl whitelist patch"
+            patch -p1 < "$KERNEL_PATCHES_FOLDER/common/bbg/0001-Enable-abl-and-efisp-flashing-for-efisp-exploit-devices.patch"
+          ;;
+        esac
+        
         echo "✅ BBG LSM added"
         echo "::endgroup::"
 
@@ -1229,12 +1272,7 @@ runs:
         set -euo pipefail
         echo "::group::Apply KSU hooks"
         cd "$COMMON_KERNEL_FOLDER"
-        echo "Applying KSU hooks patch..."
-        if ! patch -p1 < "$KERNEL_PATCHES_FOLDER/next/scope_min_manual_hooks_v1.4.patch"; then
-          echo "::error::KSU hooks patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 < "$KERNEL_PATCHES_FOLDER/next/scope_min_manual_hooks_v1.4.patch"
         echo "✅ KSU hooks applied"
         echo "::endgroup::"
 
@@ -1248,232 +1286,186 @@ runs:
         MIN_VERSION="5.16"
         if [ "$(printf '%s\n' "$KERNEL_VERSION" "$MIN_VERSION" | sort -V | head -n1)" = "$KERNEL_VERSION" ]; then
           echo "Patching ptrace!"
-          if ! patch -p1 --fuzz=2 < "$KERNEL_PATCHES_FOLDER/gki_ptrace.patch"; then
-            echo "::error::gki_ptrace patch failed. Dumping all .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          fi
+          patch -p1 -F 3 < "$KERNEL_PATCHES_FOLDER/gki_ptrace.patch"
         else
           echo "Kernel >= $MIN_VERSION, skipping ptrace patch"
         fi
+        
         if [ "$OP_HMBIRD" = true ]; then
           echo "Patching hmbird!"
           HMBIRD_MODEL=$(echo "$OP_MODEL" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+$//')
           case "$OP_MODEL" in
-            OP-ACE-5-ULTRA-6.6.50|OP-ACE-5-PRO-6.6.30|OP13-CPH-6.6.56)
+            OP-ACE-5-ULTRA-6.6.50|OP-ACE-5-PRO-6.6.30|OP13-6.6.30|OP13-CPH-6.6.56)
               FENGCHI_DIR="$KERNEL_PATCHES_FOLDER/oneplus/hmbird/deprecated" ;;
             *)
               FENGCHI_DIR="$KERNEL_PATCHES_FOLDER/oneplus/hmbird" ;;
           esac
-          case "$OP_MODEL" in
-            OP13-6.6.30)
-              HMBIRD_MODEL="OP13-PJZ" ;;
-          esac
-          # Upstream WildKernels/kernel_patches names fengchi patches with the
-          # A14/A15/A16 OS convention (e.g. fengchi_OP13T_A16.patch). This fork
-          # keeps OOS naming everywhere else, so translate OOS<NN> -> A<NN> only
-          # for the fengchi filename lookup against the upstream patches repo.
-          HMBIRD_OS="${OP_OS_VERSION/OOS/A}"
-          dos2unix "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${HMBIRD_OS}.patch"
-          if ! patch -p1 --fuzz=2 < "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${HMBIRD_OS}.patch"; then
-            echo "::warning::hmbird fengchi patch did not apply cleanly. Continuing without it."
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
+          dos2unix "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${OP_OS_VERSION}.patch"
+          patch -p1 -F 3 < "$FENGCHI_DIR/fengchi_${HMBIRD_MODEL}_${OP_OS_VERSION}.patch"
           dos2unix "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/overwriter.patch"
-          if ! patch -p1 --fuzz=2 < "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/overwriter.patch"; then
-            echo "::warning::hmbird overwriter patch did not apply cleanly. Continuing without it."
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
-          chmod +x ./drivers/of/overwriter/overwrite_configs/convert_configs.sh 2>/dev/null || true
+          patch -p1 -F 3 < "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/overwriter.patch"
+          chmod +x ./drivers/of/overwriter/overwrite_configs/convert_configs.sh
           dos2unix "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/hmbird_config.patch"
-          if ! patch -p1 --fuzz=2 < "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/hmbird_config.patch"; then
-            echo "::warning::hmbird config patch did not apply cleanly. Continuing without it."
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
+          patch -p1 -F 3 < "$KERNEL_PATCHES_FOLDER/oneplus/hmbird/hmbird_config.patch"
         else
           echo "Hmbird not enabled, skipping fengchi patch"
         fi
+
+        overlay_patched=0
+        if [ "$(printf '%s\n' "$KERNEL_VERSION" "$MIN_VERSION" | sort -V | head -n1)" = "$KERNEL_VERSION" ]; then
+          echo "Kernel <= $MIN_VERSION, skipping module intercept and overlay mechanism patch"
+        else
+          echo "Patching module intercept and overlay mechanism"
+          patch -p1 -F 3 < "$KERNEL_PATCHES_FOLDER/oneplus/module_overlay/0001-module-Add-module-intercept-and-overlay-mechanism.patch"
+          overlay_patched=1
+          chmod +x ./kernel/module/module_overlay/convert_overlay.sh
+        fi
+
+        copied_modules=""
+        if [ "$overlay_patched" -eq 1 ]; then
+          SOC="${OP_BRANCH#*/}"
+
+          declare -A selected_file=()
+          declare -A selected_priority=()
+          selected_count=0
+
+          # Define suffixes in order of priority (1 to 7)
+          suffixes=(
+            "_${OP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}.ko"
+            "_${SOC}_${OP_OS_VERSION}_${KERNEL_FULL_VER}.ko"
+            "_${OP_MODEL}_${OP_OS_VERSION}.ko"
+            "_${SOC}_${OP_OS_VERSION}.ko"
+            "_${OP_MODEL}.ko"
+            "_${SOC}.ko"
+            "_${KERNEL_FULL_VER}.ko"
+          )
+
+          while IFS= read -r -d '' file; do
+            filename="${file##*/}"
+            module_name=""
+            priority=0
+
+            exact_module_name=$(modinfo -F name "$file" 2>/dev/null)
+
+            # Evaluate priorities by iterating through the ordered suffixes
+            for i in "${!suffixes[@]}"; do
+              suffix="${suffixes[$i]}"
+              if [[ "$filename" == *"$suffix" ]]; then
+                extracted_name="${filename%"$suffix"}"
+                extracted_normalized="${extracted_name//-/_}"
+
+                if [[ "$extracted_normalized" == "$exact_module_name" ]]; then
+                  module_name="$extracted_name"
+                  priority=$((i + 1))
+                fi
+
+                break # Match found, stop checking lower priorities
+              fi
+            done
+
+            # File did not match any supported naming pattern.
+            [[ -n "$module_name" ]] || continue
+
+            if [[ -z "${selected_priority[$module_name]+exists}" ]]; then
+              echo "New module: $file"
+              selected_file["$module_name"]="$file"
+              selected_priority["$module_name"]="$priority"
+              selected_count=$((selected_count + 1))
+            elif (( priority < selected_priority["$module_name"] )); then
+              echo "Existing module: $file ; replace with a higher-priority variant."
+              selected_file["$module_name"]="$file"
+              selected_priority["$module_name"]="$priority"
+            fi
+          done < <(find "$KERNEL_PATCHES_FOLDER/oneplus/module_overlay/modules/" -type f -name '*.ko' -print0)
+
+          if (( selected_count == 0 )); then
+            echo "No matching kernel modules found."
+          fi
+
+          for module_name in "${!selected_file[@]}"; do
+            file="${selected_file[$module_name]}"
+            priority="${selected_priority[$module_name]}"
+            echo "Copying module '$module_name' priority=$priority: $file"
+
+            dest_path="$COMMON_KERNEL_FOLDER/kernel/module/module_overlay/modules/${module_name}.ko"
+            cp -v -- "$file" "$dest_path"
+
+            if [ -z "$copied_modules" ]; then
+              copied_modules="$dest_path"
+            else
+              copied_modules="$copied_modules:$dest_path"
+            fi
+          done
+        fi
+
+        ccache --set-config=extra_files_to_hash="$copied_modules"
         
-        echo "Patching optimized_mem_operations.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/optimized_mem_operations.patch"; then
-          echo "::error::optimized_mem_operations patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching file_struct_8bytes_align.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/file_struct_8bytes_align.patch"; then
-          echo "::error::file_struct_8bytes_align patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching reduce_cache_pressure.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_cache_pressure.patch"; then
-          echo "::error::reduce_cache_pressure patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        echo "✅ Other patches applied"
+        echo "::endgroup::"
+
+
+    - name: Apply Optimisation Patches
+      if: ${{ env.OP_OPT == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Apply Optimisation patches"
+        cd "$COMMON_KERNEL_FOLDER"
+        KERNEL_VERSION="${{ env.KERNEL_VER }}"
+        MIN_VERSION="5.16"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/optimized_mem_operations.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/file_struct_8bytes_align.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_cache_pressure.patch"
         
-        echo "Patching mem_opt_prefetch.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/mem_opt_prefetch.patch"; then
-          echo "::error::mem_opt_prefetch patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/mem_opt_prefetch.patch"
         
         if [ "$(printf '%s\n' "$KERNEL_VERSION" "$MIN_VERSION" | sort -V | tail -n1)" = "$KERNEL_VERSION" ]; then
-          echo "Patching optimise_memcmp.patch"
-          if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/optimise_memcmp.patch"; then
-            echo "::error::optimise_memcmp patch failed. Dumping all .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          fi
+          patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/optimise_memcmp.patch"
         elif [ "$(printf '%s\n' "$KERNEL_VERSION" "5.11" | sort -V | tail -n1)" = "$KERNEL_VERSION" ]; then
-          echo "Patching optimise_memcmp.patch (sed variant)"
-          if ! sed -e 's/SYM_FUNC_START(__pi_memcmp)/SYM_FUNC_START_WEAK_PI(memcmp)/' -e 's/SYM_FUNC_END(__pi_memcmp)/SYM_FUNC_END_PI(memcmp)/' -e 's/SYM_FUNC_ALIAS_WEAK(memcmp, __pi_memcmp)/EXPORT_SYMBOL_NOKASAN(memcmp)/' "$KERNEL_PATCHES_FOLDER/common/optimise_memcmp.patch" | patch -p1 --forward; then
-            echo "::error::optimise_memcmp (sed variant) patch failed. Dumping all .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          fi
+          sed -e 's/SYM_FUNC_START(__pi_memcmp)/SYM_FUNC_START_WEAK_PI(memcmp)/' -e 's/SYM_FUNC_END(__pi_memcmp)/SYM_FUNC_END_PI(memcmp)/' -e 's/SYM_FUNC_ALIAS_WEAK(memcmp, __pi_memcmp)/EXPORT_SYMBOL_NOKASAN(memcmp)/' "$KERNEL_PATCHES_FOLDER/common/optimise_memcmp.patch" | patch -p1 --forward
         else
           echo "Optimised memcmp patch not found!"
         fi
-        echo "Patching minimise_wakeup_time.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/minimise_wakeup_time.patch"; then
-          echo "::error::minimise_wakeup_time patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching int_sqrt.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/int_sqrt.patch"; then
-          echo "::error::int_sqrt patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching force_tcp_nodelay.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/force_tcp_nodelay.patch"; then
-          echo "::error::force_tcp_nodelay patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching reduce_gc_thread_sleep_time.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_gc_thread_sleep_time.patch"; then
-          echo "::error::reduce_gc_thread_sleep_time patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching add_timeout_wakelocks_globally.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/add_timeout_wakelocks_globally.patch"; then
-          echo "::error::add_timeout_wakelocks_globally patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching f2fs_reduce_congestion.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/f2fs_reduce_congestion.patch"; then
-          echo "::error::f2fs_reduce_congestion patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        echo "Patching reduce_freeze_timeout.patch"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_freeze_timeout.patch"; then
-          echo "::error::reduce_freeze_timeout patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/minimise_wakeup_time.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/int_sqrt.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/force_tcp_nodelay.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_gc_thread_sleep_time.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/add_timeout_wakelocks_globally.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/f2fs_reduce_congestion.patch"
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_freeze_timeout.patch"
         
         if [ "$(printf '%s\n' "$KERNEL_VERSION" "$MIN_VERSION" | sort -V | head -n1)" = "$KERNEL_VERSION" ]; then
-          echo "Patching clear_page_16bytes_align.patch"
-          if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/clear_page_16bytes_align.patch"; then
-            echo "::warning::clear_page_16bytes_align patch did not apply cleanly. Continuing without it (alignment optimization only)."
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
+          patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/clear_page_16bytes_align.patch"
         else
-          echo "Patching clear_page_16bytes_align.patch (sed variant)"
-          if ! cat "$KERNEL_PATCHES_FOLDER/common/clear_page_16bytes_align.patch" | sed -e 's/SYM_FUNC_START_PI(clear_page)/SYM_FUNC_START_PI(__pi_clear_page)/' | patch -p1 --fuzz=2 --forward; then
-            echo "::warning::clear_page_16bytes_align (sed variant) patch did not apply cleanly. Continuing without it (alignment optimization only)."
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            find . -name "*.rej" -delete 2>/dev/null || true
-          fi
+          cat "$KERNEL_PATCHES_FOLDER/common/clear_page_16bytes_align.patch" | sed -e 's/SYM_FUNC_START_PI(clear_page)/SYM_FUNC_START_PI(__pi_clear_page)/' | patch -p1 -F3 --forward
         fi
-        
         
         echo "Patching add_limitation_scaling_min_freq.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/add_limitation_scaling_min_freq.patch"; then
-          echo "::error::add_limitation_scaling_min_freq patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/add_limitation_scaling_min_freq.patch"
         echo "Patching re_write_limitation_scaling_min_freq.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/re_write_limitation_scaling_min_freq.patch"; then
-          echo "::error::re_write_limitation_scaling_min_freq patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/re_write_limitation_scaling_min_freq.patch"
         echo "Patching adjust_cpu_scan_order.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/adjust_cpu_scan_order.patch"; then
-          echo "::error::adjust_cpu_scan_order patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/adjust_cpu_scan_order.patch"
         echo "Patching avoid_extra_s2idle_wake_attempts.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/avoid_extra_s2idle_wake_attempts.patch"; then
-          echo "::error::avoid_extra_s2idle_wake_attempts patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/avoid_extra_s2idle_wake_attempts.patch"
         echo "Patching disable_cache_hot_buddy.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/disable_cache_hot_buddy.patch"; then
-          echo "::error::disable_cache_hot_buddy patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/disable_cache_hot_buddy.patch"
         echo "Patching f2fs_enlarge_min_fsync_blocks.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/f2fs_enlarge_min_fsync_blocks.patch"; then
-          echo "::error::f2fs_enlarge_min_fsync_blocks patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/f2fs_enlarge_min_fsync_blocks.patch"
         echo "Patching increase_ext4_default_commit_age.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/increase_ext4_default_commit_age.patch"; then
-          echo "::error::increase_ext4_default_commit_age patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/increase_ext4_default_commit_age.patch"
         echo "Patching increase_sk_mem_packets.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/increase_sk_mem_packets.patch"; then
-          echo "::error::increase_sk_mem_packets patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/increase_sk_mem_packets.patch"
         echo "Patching reduce_pci_pme_wakeups.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_pci_pme_wakeups.patch"; then
-          echo "::error::reduce_pci_pme_wakeups patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/reduce_pci_pme_wakeups.patch"
         echo "Patching silence_irq_cpu_logspam.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/silence_irq_cpu_logspam.patch"; then
-          echo "::error::silence_irq_cpu_logspam patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/silence_irq_cpu_logspam.patch"
         echo "Patching silence_system_logspam.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/silence_system_logspam.patch"; then
-          echo "::error::silence_system_logspam patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/silence_system_logspam.patch"
         echo "Patching use_unlikely_wrap_cpufreq.patch"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/common/use_unlikely_wrap_cpufreq.patch"; then
-          echo "::warning::use_unlikely_wrap_cpufreq patch did not apply cleanly. Continuing without it (cpufreq optimization only)."
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          find . -name "*.rej" -delete 2>/dev/null || true
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/use_unlikely_wrap_cpufreq.patch"
         
-        echo "✅ Other patches applied"
+        echo "✅ Optimisation Patches applied"
         echo "::endgroup::"
 
     - name: Apply NTSync Patch
@@ -1492,8 +1484,7 @@ runs:
           OP10r|OP-ACE-2-5.10.209|OP-ACE-2V-5.10.209|OP-PAD-MT6983-5.10.209|\
           OP10pro-5.10.209|OP10t-5.10.209|OP-ACE-5.10.209|OP11r-5.10.209|\
           OP-NORD-3-5.10.209|OP-ACE-RACE-5.10.209)
-            if [[ "$OP_OS_VERSION" == "OOS15" ]]; then
-              # Upstream names this compat patch with the A-OS convention (_A14).
+            if [[ "$OP_OS_VERSION" == "A15" ]]; then
               NTSYNC_PATCH="$NTSYNC_FOLDER/ntsync_compat_android12-5.10_A14.patch"
             fi
             ;;
@@ -1503,12 +1494,12 @@ runs:
             echo "::error::NTSync compat patch not found for ${OP_MODEL}: $(basename $NTSYNC_PATCH)"
             exit 1
           fi
-        elif [ -f "$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}_${OP_OS_VERSION/OOS/A}.patch" ]; then
-          NTSYNC_PATCH="$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}_${OP_OS_VERSION/OOS/A}.patch"
+        elif [ -f "$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}_${OP_OS_VERSION}.patch" ]; then
+          NTSYNC_PATCH="$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}_${OP_OS_VERSION}.patch"
         elif [ -f "$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}.patch" ]; then
           NTSYNC_PATCH="$NTSYNC_FOLDER/ntsync_compat_${GKI_KEY}.patch"
         else
-          echo "::error::NTSync patch not found for ${GKI_KEY} (Model: ${OP_MODEL}, OOS: ${OP_OS_VERSION})"
+          echo "::error::NTSync patch not found for ${GKI_KEY} (Model: ${OP_MODEL}, Android Version: ${OP_OS_VERSION})"
           exit 1
         fi
         
@@ -1520,34 +1511,9 @@ runs:
         fi
         
         echo "Patching $(basename $NTSYNC_PATCH)!"
-        if ! patch -p1 --forward < "$NTSYNC_PATCH"; then
-          echo "::warning::NTSync compat patch did not apply cleanly. Checking for manual fallback..."
-          REJ_COUNT=$(find . -name "*.rej" | wc -l)
-          if [ "$REJ_COUNT" -eq 1 ] && [ -f include/linux/lockdep.h.rej ]; then
-            echo "Only lockdep.h failed. Applying lockdep.h changes manually..."
-            # Add missing lockdep macros if not already present
-            grep -q '#define lockdep_assert(c)' include/linux/lockdep.h || \
-              sed -i '/#define lockdep_is_held_type(l, r)/a\#define lockdep_assert(c)\t\t\tdo { } while (0)' include/linux/lockdep.h
-            grep -q '#define lockdep_assert_once(c)' include/linux/lockdep.h || \
-              sed -i '/#define lockdep_assert(c)/a\#define lockdep_assert_once(c)\t\t\tdo { } while (0)' include/linux/lockdep.h
-            grep -q '#define lockdep_assert_not_held(l)' include/linux/lockdep.h || \
-              sed -i '/#define lockdep_assert_held(l)/a\#define lockdep_assert_not_held(l)\t\tdo { (void)(l); } while (0)' include/linux/lockdep.h
-            grep -q '#define lockdep_assert_none_held_once()' include/linux/lockdep.h || \
-              sed -i '/#define lockdep_assert_held_once(l)/a\#define lockdep_assert_none_held_once()\tdo { } while (0)' include/linux/lockdep.h
-            rm -f include/linux/lockdep.h.rej
-            echo "✅ lockdep.h manual fallback applied"
-          else
-            echo "::error::$(basename $NTSYNC_PATCH) patch failed. Dumping all .rej files:"
-            find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-            exit 1
-          fi
-        fi
+        patch -p1 --forward < "$NTSYNC_PATCH"
         echo "Patching ntsync_base!"
-        if ! patch -p1 --forward < "$NTSYNC_FOLDER/ntsync_base.patch"; then
-          echo "::error::ntsync_base patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$NTSYNC_FOLDER/ntsync_base.patch"
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_NTSYNC=y
         EOF
@@ -1566,17 +1532,9 @@ runs:
         
         echo "Patching unicode!"
         if [ "$(printf '%s\n' "$KERNEL_VERSION" "$MIN_VERSION" | sort -V | head -n1)" = "$KERNEL_VERSION" ]; then
-            if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/unicode_bypass_fix_6.1-.patch"; then
-              echo "::error::unicode_bypass_fix_6.1- patch failed. Dumping all .rej files:"
-              find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-              exit 1
-            fi
+            patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/unicode_bypass_fix_6.1-.patch"
         else
-            if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/unicode_bypass_fix_6.1+.patch"; then
-              echo "::error::unicode_bypass_fix_6.1+ patch failed. Dumping all .rej files:"
-              find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-              exit 1
-            fi
+            patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/unicode_bypass_fix_6.1+.patch"
         fi
 
     - name: Add Tmpfs Support
@@ -1589,7 +1547,6 @@ runs:
         CONFIG_TMPFS_POSIX_ACL=y
         EOF
 
-
     - name: Add BBR
       if: ${{ env.OP_BBR == 'true' }}
       shell: bash
@@ -1599,8 +1556,42 @@ runs:
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_TCP_CONG_ADVANCED=y
         CONFIG_TCP_CONG_BBR=y
+        EOF
+
+    - name: Apply BBRv3
+      if: ${{ env.OP_BBR3 == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Apply BBRv3 patches"
+        cd "$COMMON_KERNEL_FOLDER"
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        CONFIG_TCP_CONG_ADVANCED=y
+        CONFIG_TCP_CONG_BBR3=y
+        EOF
+        patch -p1 < "$KERNEL_PATCHES_FOLDER/common/bbrv3/0001-net-tcp-backport-BBRv3-to-$ANDROID_VER-$KERNEL_VER.patch"
+        
+        if [ "${{ env.ANDROID_VER }}" = "android12" ] && [ "${{ env.KERNEL_VER }}" = "5.10" ]; then
+          if ! grep -qF 'int proc_dou8vec_minmax(' ./include/linux/sysctl.h; then
+            patch -p1 < "$KERNEL_PATCHES_FOLDER/common/bbrv3/sysctl_add_proc_dou8vec_minmax.patch"
+            patch -p1 < "$KERNEL_PATCHES_FOLDER/common/bbrv3/sysctl_fix_data-races_in_proc_dou8vec_minmax.patch"
+          fi
+        fi
+        
+        echo "✅ BBRv3 patches applied"
+        echo "::endgroup::"
+
+    - name: Enable Important Net Schedulers (qdisc)
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Enable Important Net Schedulers (qdisc)"
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_NET_SCH_FQ=y
         CONFIG_NET_SCH_FQ_CODEL=y
+        CONFIG_NET_SCH_CAKE=y
+        CONFIG_NET_SCH_PIE=y
+        CONFIG_NET_SCH_FQ_PIE=y
         EOF
 
     - name: Add TTL Target Support
@@ -1654,69 +1645,6 @@ runs:
         CONFIG_IP6_NF_NAT=y
         CONFIG_IP6_NF_TARGET_MASQUERADE=y
         EOF
-        
-        echo "Patching IPv6_NAT_FIX.patch"
-        if ! patch -p1 --fuzz=2 < "$KERNEL_PATCHES_FOLDER/common/IPv6_NAT_FIX.patch"; then
-          echo "::error::IPv6_NAT_FIX patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-    
-    - name: Add USB DWC3 & OTG Support
-      shell: bash
-      run: |
-        set -euo pipefail
-        echo "::group::Add USB DWC3 Configuration"
-        
-        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_USB_DWC3=y
-        CONFIG_USB_DWC3_DUAL_ROLE=y
-        CONFIG_USB_GADGET=y
-        CONFIG_USB_CONFIGFS=y
-        CONFIG_TYPEC=y
-        EOF
-
-        if [[ "${OP_BRANCH,,}${OP_SOC,,}" == *"mt"* ]]; then
-            echo "Detected MediaTek (mt). Adding MTK USB PHY configs..."
-            cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_USB_DWC3_MTK=y
-        CONFIG_PHY_MTK_TPHY=y
-        EOF
-        elif [[ "${OP_BRANCH,,}${OP_SOC,,}" == *"sm"* ]]; then
-            echo "Detected Qualcomm (sm). Adding QCOM USB PHY configs..."
-            cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_USB_DWC3_QCOM=y
-        CONFIG_PHY_QCOM_QMP=y
-        CONFIG_PHY_QCOM_USB_HS=y
-        EOF
-        else
-            echo "⚠️ Unrecognized hardware. Falling back to generic DWC3 configs."
-        fi
-
-        echo "✅ Dynamic USB DWC3 configs added"
-        echo "::endgroup::"
-
-    - name: Add LXC / Droidspaces support
-      shell: bash
-      if: ${{ env.OP_LXC_DS == 'true' }}
-      run: |
-        set -euo pipefail
-        echo "Add Droidspaces Support"
-        cd "$COMMON_KERNEL_FOLDER"
-        
-        echo "Applying patch to enable SYSVIPC without breaking ABI"
-        if ! patch -p1 --fuzz=2 --forward < "$KERNEL_PATCHES_FOLDER/oneplus/lxc_droidspaces/enable_sysvipc.patch"; then
-          echo "::error::enable_sysvipc patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
-        
-        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_SYSVIPC = y
-        CONFIG_DEVTMPFS = y
-        CONFIG_PID_NS = y
-        CONFIG_POSIX_MQUEUE = y
-        EOF
 
     - name: Add Droidspaces support
       shell: bash
@@ -1729,54 +1657,26 @@ runs:
         echo "Applying patch to enable SYSVIPC without breaking ABI"
         case "$OP_BRANCH" in
           wild/sm8850|wild/sm8845)
-            if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_a16-6.12.patch"; then
-              echo "::error::fix_sysvipc_kabi_a16-6.12 patch failed. Dumping all .rej files:"
-              find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-              exit 1
-            fi
+            patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_a16-6.12.patch"
             ;;
           wild/sm8550|wild/sm7550)
-            if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_1_2_3.patch"; then
-              echo "::error::fix_sysvipc_kabi_1_2_3 patch failed. Dumping all .rej files:"
-              find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-              exit 1
-            fi
+            patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_1_2_3.patch"
             ;;
           wild/sm8450|wild/sm8475|wild/mt6895|wild/mt6983|wild/mt6789)
             if [ "$ANDROID_VER" = "android12" ] && [ "$KERNEL_VER" = "5.10" ]; then
-              if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_bypass_a16-6.12_below.patch"; then
-                echo "::error::fix_sysvipc_kabi_bypass_a16-6.12_below patch failed. Dumping all .rej files:"
-                find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-                exit 1
-              fi
-              if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_abi_padding_for_posix_mqueue.patch"; then
-                echo "::error::fix_abi_padding_for_posix_mqueue patch failed. Dumping all .rej files:"
-                find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-                exit 1
-              fi
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_bypass_a16-6.12_below.patch"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_abi_padding_for_posix_mqueue.patch"
             else
-              if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"; then
-                echo "::error::fix_sysvipc_kabi_6_7_8 patch failed. Dumping all .rej files:"
-                find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-                exit 1
-              fi
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"
             fi
             ;;
           *)
-            if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"; then
-              echo "::error::fix_sysvipc_kabi_6_7_8 patch failed. Dumping all .rej files:"
-              find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-              exit 1
-            fi
+            patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/fix_sysvipc_kabi_6_7_8.patch"
             ;;
         esac
         
         echo "Patch to fix kernel panic caused by oplus_bsp_midas"
-        if ! patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch"; then
-          echo "::error::ghost-task patch failed. Dumping all .rej files:"
-          find . -name "*.rej" -exec echo "=== {} ===" \; -exec cat {} \;
-          exit 1
-        fi
+        patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch"
         
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_SYSVIPC=y
@@ -1786,7 +1686,10 @@ runs:
         CONFIG_NETFILTER_XT_TARGET_REJECT=y
         CONFIG_NETFILTER_XT_TARGET_LOG=y
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
+        CONFIG_USER_NS=y
         EOF
+        
+        patch -p1 < "$KERNEL_PATCHES_FOLDER/common/droidspaces/0001-Guard-USER_NS-for-non-root-users.patch"
         
         if [ "${{ env.OP_RUST_BUILD }}" = "true" ]; then
           echo "Add IPC NS missing symbols for rust binder"
@@ -1824,36 +1727,6 @@ runs:
         CONFIG_ANDROID_BINDER_IPC_RUST=m
         CONFIG_RUST=y
         EOF
-    
-    - name: Resolve KSU Symbol Dependencies
-      shell: bash
-      run: |
-        set -euo pipefail
-        echo "::group::Resolve KSU Symbol Dependencies"
-        echo "Injecting fallback weak symbol into KernelSU resolver..."
-        RESOLVER=$(find "$KSU_FOLDER" -name "symbol_resolver.c" | head -n 1)
-        if [ -n "$RESOLVER" ]; then
-          if ! grep -q "__weak kallsyms_on_each_symbol" "$RESOLVER"; then
-            KERNEL_VER="${{ env.KERNEL_VER }}"
-            
-            # Use appropriate function signature based on kernel version
-            if [[ "$KERNEL_VER" == "5.15" ]]; then
-              echo "Applying weak symbol signature for kernel 5.15..."
-              cat >> "$RESOLVER" << 'EOF'
-
-        /* Fallback for missing symbols (Kernel < 6.4) */
-        int __attribute__((weak)) kallsyms_on_each_symbol(int (*fn)(void *, const char *, struct module *, unsigned long), void *data) {
-            return 0;
-        }
-        EOF
-            fi
-            echo "✅ Weak symbol injected successfully."
-          else
-            echo "✅ Weak symbol already exists in resolver."
-          fi
-        else
-          echo "⚠️ symbol_resolver.c not found, skipping weak symbol injection."
-        fi
 
     - name: Save Build Metadata
       id: save_metadata
@@ -1877,7 +1750,7 @@ runs:
         echo "Customize Kernel Branding"
         cd "$COMMON_KERNEL_FOLDER"
         mkdir -p out
-        CUSTOM_LOCALVERSION="-${ANDROID_VER}-${OP_UNAME}-${{ github.actor }}"
+        CUSTOM_LOCALVERSION="-${ANDROID_VER}-${OP_UNAME}"
         echo "CUSTOM_LOCALVERSION=$CUSTOM_LOCALVERSION" >> "$GITHUB_ENV"
 
     - name: Disable GPUEB
@@ -1887,6 +1760,27 @@ runs:
         set -euo pipefail
         echo "Disabling GPUEB for MTK kernel 5.10"
         sed -i '/obj-y.*gpueb/d' "$COMMON_KERNEL_FOLDER/drivers/gpu/mediatek/Makefile"
+
+    - name: Apply Fake config.gz patch
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Apply Fake config.gz patch"
+        cd "$COMMON_KERNEL_FOLDER"
+        patch -p1 < "$KERNEL_PATCHES_FOLDER/common/fake_config.patch"
+        
+        OPTIONS=()
+        
+        if [ "$OP_BBR" = "true" ] || [ "$OP_BBR3" = "true" ]; then
+          OPTIONS+=("CONFIG_TCP_CONG_ADVANCED")
+        fi
+        
+        if [ "$OP_IP_SET" = "true" ]; then
+          OPTIONS+=("CONFIG_IP6_NF_NAT")
+        fi
+        
+        CONFIG_STRING="${OPTIONS[*]}"
+        echo "CONFIG_FAKE_DISABLE=${CONFIG_STRING}" >> $GITHUB_ENV
 
     - name: Build Kernel
       id: build_kernel_step
@@ -1927,7 +1821,7 @@ runs:
         set -u
         
         echo '#!/bin/bash' > "$COMMON_KERNEL_FOLDER/ld-wrapper"
-        echo 'ld.lld "$@" --thinlto-cache-dir=$LDCACHE_DIR --thinlto-jobs=$(nproc --all)' >> "$COMMON_KERNEL_FOLDER/ld-wrapper"
+        echo 'ld.lld "$@" --thinlto-jobs=$(nproc --all)' >> "$COMMON_KERNEL_FOLDER/ld-wrapper"
         chmod +x "$COMMON_KERNEL_FOLDER/ld-wrapper"
         
         KERNEL_BUILD_DATE=$(date -u)
@@ -1960,7 +1854,7 @@ runs:
         
         OUT=out
         mkdir -p "$OUT"
-        
+
         echo "============================================"
         echo "🔍 Compiler & ccache Verification"
         echo "============================================"
@@ -1983,7 +1877,7 @@ runs:
         
         make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" gki_defconfig
         
-        LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:--OP-RESUKISU}"
+        LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:--OP-WILD}"
         if [ -n "${LOCAL_LOCALVERSION:-}" ]; then
           scripts/config --file "$OUT/.config" --set-str LOCALVERSION "${LOCAL_LOCALVERSION}"
           scripts/config --file "$OUT/.config" -d LOCALVERSION_AUTO || true
@@ -1997,7 +1891,7 @@ runs:
           scripts/config --file "$OUT/.config" -e CC_OPTIMIZE_FOR_PERFORMANCE -d CC_OPTIMIZE_FOR_PERFORMANCE_O3
           KCFLAGS_EXTRA="-O2"
         fi
-
+        
         case "$OP_BRANCH" in
           wild/sm8750|wild/sm8850|wild/sm8845)
             KCFLAGS_EXTRA="-mcpu=oryon-1 ${KCFLAGS_EXTRA}"
@@ -2041,8 +1935,8 @@ runs:
         echo "  Compression: zstd level 3"
         echo "  Features: readonly_direct, file_clone, inode_cache, depend"
         echo "============================================"
-        
-        if [ ! -d "$CCACHE_DIR" ] || [ -z "$(find "$CCACHE_DIR" -type f 2>/dev/null | head -n1)" ]; then
+
+        if [ ! -d "$CCACHE_DIR" ] || [ -z "$(find "$CCACHE_DIR" -maxdepth 2 -type f -print -quit 2>/dev/null)" ]; then
           echo "🔥 Priming cache with header preprocessing..."
           make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -C "$COMMON_KERNEL_FOLDER" O="$OUT" headers_install prepare 2>&1 | head -n 20 || true
           echo ""
@@ -2052,8 +1946,8 @@ runs:
         set -o pipefail
         
         if [ "${{ inputs.debug }}" == "true" ]; then
-          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image modules 2>&1 | tee build.log
-          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$COMMON_KERNEL_FOLDER/out" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" INSTALL_MOD_PATH="$COMMON_KERNEL_FOLDER/out/install" modules_install 2>&1 | tee install.log
+          make V=1 LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" CONFIG_FAKE_DISABLE="$CONFIG_FAKE_DISABLE" Image modules 2>&1 | tee build.log
+          make V=1 LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$COMMON_KERNEL_FOLDER/out" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" CONFIG_FAKE_DISABLE="$CONFIG_FAKE_DISABLE" INSTALL_MOD_PATH="$COMMON_KERNEL_FOLDER/out/install" modules_install 2>&1 | tee install.log
           
           cp build.log "$DEBUG_ARTIFACTS_FOLDER/build.log"
           cp install.log "$DEBUG_ARTIFACTS_FOLDER/install.log"
@@ -2064,7 +1958,7 @@ runs:
           
           ls -la "$DEBUG_ARTIFACTS_FOLDER"
         else
-          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" Image 2>&1 | tee build.log
+          make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" -j"$(nproc --all)" O="$OUT" KCFLAGS="$KCFLAGS" KCPPFLAGS="$KCPPFLAGS" CONFIG_FAKE_DISABLE="$CONFIG_FAKE_DISABLE" Image 2>&1 | tee build.log
         fi
         
         BUILD_END=$(date +%s)
@@ -2074,8 +1968,7 @@ runs:
         echo "BUILD_END=$BUILD_END" >> "$GITHUB_ENV"
         echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_ENV"
         
-        BOOT_DIR="$OUT/arch/arm64/boot"
-        IMG="$BOOT_DIR/Image"
+        IMG="$OUT/arch/arm64/boot/Image"
         if [ ! -f "$IMG" ]; then
           echo "::error::Kernel Image missing"
           echo "::group::Last 100 lines of build log"
@@ -2083,7 +1976,7 @@ runs:
           echo "::endgroup::"
           exit 1
         fi
-
+        
         IMG_SIZE=$(stat -c%s "$IMG")
         
         echo "============================================"
@@ -2091,12 +1984,11 @@ runs:
         echo "============================================"
         echo "Duration: $((BUILD_TIME / 60))m $((BUILD_TIME % 60))s"
         echo "Image: $(numfmt --to=iec-i --suffix=B "$IMG_SIZE")"
-        if [ "${{ inputs.clean }}" != "true" ]; then
-          echo ""
-          echo "📊 ccache Post-Build Statistics"
-          echo "============================================"
-          ccache -s
-        fi
+        
+        echo ""
+        echo "📊 ccache Post-Build Statistics"
+        echo "============================================"
+        ccache -s
         echo "============================================"
         echo "::endgroup::"
 
@@ -2114,15 +2006,13 @@ runs:
         ccache -c
         
         echo "Perform ccache eviction!"
-        # 3h = 10800s using seconds to support older ccache
-        ccache --evict-older-than 10800s
-        
-        echo "Perform LTO cache eviction!"
-        if [ -d "$LDCACHE_DIR" ]; then
-          # Delete LTO cache files modified more than 180 minutes (3 hours) ago
-          find "$LDCACHE_DIR" -type f -amin +180 -delete
-          find "$LDCACHE_DIR" -type d -empty -delete
-        fi
+        # 0.5 days = 12 Hrs. Delete cache unused in 12 hrs. 12 hrs is considered for safety.
+        # Yes. ccache uses mtime as a store of time due to cross compatibility with different OS.
+        find "$CCACHE_DIR" -type f -mtime +0.5 -delete
+        # Remove empty layout subdirectories
+        find "$CCACHE_DIR" -type d -empty -delete
+
+        cp "${{ env.CCACHE_LOGFILE }}" "$CCACHE_DIR"
         
         if [ "${{ inputs.debug }}" == "true" ]; then
           if [ -f "${{ env.CCACHE_LOGFILE }}" ]; then
@@ -2169,7 +2059,7 @@ runs:
         echo "## 📊 ccache Statistics" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        ccache -s >> $GITHUB_STEP_SUMMARY
+        ccache -s --verbose >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
 
     - name: Collect Build Stats / Validate Image
@@ -2256,6 +2146,13 @@ runs:
         
         sed -i 's/do.check_boot_version=.*/do.check_boot_version=1/' anykernel.sh
         
+        case "$OP_BRANCH" in
+          wild/sm8850|wild/sm8845)
+            echo "Applying BBG efisp abl whitelist control patch"
+            patch -p1 < "$KERNEL_PATCHES_FOLDER/common/bbg/0001-Enable-volume-input-to-enable-bbg-efisp-patch.patch"
+          ;;
+        esac
+        
         ZIP_MODEL=$(echo "$OP_MODEL" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+$//')
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}_${{ inputs.ksu_type }}_${KSUVER:-unknown}_SuSFS_${SUSVER:-unknown}.zip"
@@ -2310,9 +2207,9 @@ runs:
           echo "Kernel Uname: ${{ env.KERNEL_UNAME }}"
           echo "Build User: ${{ env.BUILD_USER }}"
           echo "Build Host: ${{ env.BUILD_HOST }}"
-          if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
-            echo "ReSukiSU Version: ${KSUVER:-unknown}"
-            echo "ReSukiSU commit SHA: ${KSU_SHA:-unknown}"
+          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+            echo "KSUN Version: ${KSUVER:-unknown}"
+            echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
           else
             echo "KSU Version: ${KSUVER:-unknown}"
             echo "KSU commit SHA: ${KSU_SHA:-unknown}"
@@ -2325,7 +2222,9 @@ runs:
           echo "Clean Build: ${{ inputs.clean }}"
           echo ""
           echo "=== OnePlus Features ==="
+          echo "Kernel Optimisations: ${{ env.OP_OPT }}"
           echo "BBR: ${{ env.OP_BBR }}"
+          echo "BBRv3: ${{ env.OP_BBR3 }}"
           echo "BBG: ${{ env.OP_BBG }}"
           echo "HMBIRD SCX: ${{ env.OP_HMBIRD }}"
           echo "TTL: ${{ env.OP_TTL }}"
@@ -2359,16 +2258,15 @@ runs:
           echo "| **Kernel Uname** | \`${{ env.KERNEL_UNAME }}\` |"
           echo "| **Build User** | ${{ env.BUILD_USER }} |"
           echo "| **Build Host** | ${{ env.BUILD_HOST }} |"
-          
-          if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
-            echo "| **ReSukiSU Version** | ${KSUVER:-unknown} |"
+          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+            echo "| **KSUN Version** | ${KSUVER:-unknown} |"
           else
             echo "| **KSU Version** | ${KSUVER:-unknown} |"
           fi
           
           if [ "$KSU_SHA" != "unknown" ]; then
-            if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
-              echo "| **ReSukiSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/ReSukiSU/ReSukiSU/commit/$KSU_SHA) |"
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/KernelSU-Next/KernelSU-Next/commit/$KSU_SHA) |"
             else
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
@@ -2391,7 +2289,9 @@ runs:
           echo ""
           echo "| Feature | Status |"
           echo "|---------|--------|"
+          echo "| **Kernel Optimisations** | ${{ env.OP_OPT }} |"
           echo "| **BBR** | ${{ env.OP_BBR }} |"
+          echo "| **BBRv3** | ${{ env.OP_BBR3 }} |"
           echo "| **BBG** | ${{ env.OP_BBG }} |"
           echo "| **HMBIRD SCX** | ${{ env.OP_HMBIRD }} |"
           echo "| **TTL** | ${{ env.OP_TTL }} |"
@@ -2464,18 +2364,6 @@ runs:
         cache_path: ${{ env.CCACHE_DIR }}
         cache_key: ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         cache_bucket: "ccache-cache"
-        debug: ${{ inputs.debug }}
-        github_token: ${{ inputs.github_token }}
-        working_dir: "./main-source"
-        compression_level: 6
-
-    - name: Save LTO LD cache
-      if: always() && ${{ env.OP_LTO != 'none' }} && steps.build_kernel_step.conclusion == 'success'
-      uses: ./action-source/.github/actions/cache/save
-      with:
-        cache_path: ${{ env.LDCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
-        cache_bucket: "lto-cache"
         debug: ${{ inputs.debug }}
         github_token: ${{ inputs.github_token }}
         working_dir: "./main-source"
