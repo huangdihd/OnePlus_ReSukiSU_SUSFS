@@ -1031,7 +1031,7 @@ runs:
               echo "ℹ️ Skipping KernelSU folder patch for ReSukiSU"
             fi
             ;;
-          "v2.2.0")
+          "v2.2.0"|"v2.3.0")
             if [ "${{ inputs.ksu_type }}" = "KSU" ]; then
               cd "$KSU_FOLDER"
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
@@ -1144,6 +1144,15 @@ runs:
             exit 1
           else
             echo "Patch applied successfully with manual fallback for mm/memory.c!"
+          fi
+        fi
+
+        if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
+          exec_file="./fs/exec.c"
+          sed -i '/extern int ksu_install_su_fd(void);/d; /^[[:space:]]*ksu_install_su_fd();$/d' "$exec_file"
+          if grep -Fq 'ksu_install_su_fd' "$exec_file"; then
+            echo "::error::Failed to remove unsupported ReSukiSU ksu_install_su_fd() call"
+            exit 1
           fi
         fi
 
