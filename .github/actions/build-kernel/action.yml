@@ -1147,6 +1147,15 @@ runs:
           fi
         fi
 
+        if [ "${{ inputs.ksu_type }}" = "ReSukiSU" ]; then
+          exec_file="./fs/exec.c"
+          sed -i '/extern int ksu_install_su_fd(void);/d; /^[[:space:]]*ksu_install_su_fd();$/d' "$exec_file"
+          if grep -Fq 'ksu_install_su_fd' "$exec_file"; then
+            echo "::error::Failed to remove unsupported ReSukiSU ksu_install_su_fd() call"
+            exit 1
+          fi
+        fi
+
         # SUSFS targets the newer four-argument API, while some OnePlus 5.10
         # trees still expose the original three-argument set_nameidata().
         namei_file="./fs/namei.c"
