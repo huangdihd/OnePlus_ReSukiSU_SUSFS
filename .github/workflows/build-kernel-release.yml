@@ -419,7 +419,7 @@ jobs:
               "android12-5.10": $a12,
               "android13-5.15": $a13,
               "android14-6.1":  $a14,
-              "android15-6.6": $a15,
+              "android15-6.6":  $a15,
               "android16-6.12": $a16
             }')
           
@@ -1001,9 +1001,12 @@ jobs:
 
       - name: 🧹 Exclude build helper artifacts from release staging
         run: |
-          # Shared build helpers must never become release assets.
+          # Shared build helpers must never become release assets. With
+          # skip-decompress=true, archived helpers are downloaded as <name>.zip.
           find ./downloaded-artifacts -maxdepth 2 -type f -name ccache -delete
           find ./downloaded-artifacts -maxdepth 2 -type f -name 'susfs4ksu-*.tar.gz' -delete
+          rm -f ./downloaded-artifacts/ccache-binary.zip
+          rm -f ./downloaded-artifacts/susfs-archives.zip
           rm -rf ./downloaded-artifacts/ccache-binary
           rm -rf ./downloaded-artifacts/susfs-archives
           echo "✅ build helper artifacts excluded from release staging"
