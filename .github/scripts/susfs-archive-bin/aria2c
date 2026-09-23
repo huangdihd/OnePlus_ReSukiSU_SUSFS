@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The build action fetches source archives with aria2c. For SUSFS specifically,
+# CI pre-downloads the resolved commit archives once and distributes them as a
+# GitHub Actions artifact. This shim serves those local archives while passing
+# every other aria2c invocation through unchanged.
+
+args=("$@")
+out=""
+dir="."
+url=""
+
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    -o|--out)
+      if (( i + 1 < ${#args[@]} )); then
+        out="${args[$((i + 1))]}"
+        ((i += 1))
+      fi
+      ;;
+    -d|--dir)
+      if (( i + 1 < ${#args[@]} )); then
+        dir="${args[$((i + 1))]}"
+        ((i += 1))
+      fi
+      ;;
+    http://*|https://*)
+      url="${args[$i]}"
+      ;;
+  esac
+done
+
+susfs_prefix="https://gitlab.com/simonpunk/susfs4ksu/-/archive/"
+if [[ "$url" == "${susfs_prefix}"* ]]; then
+  ref="${url#${susfs_prefix}}"
+  ref="${ref%%/*}"
+  archive="${GITHUB_WORKSPACE}/susfs-archives/susfs4ksu-${ref}.tar.gz"
+
+  if [[ -z "$out" ]]; then
+    echo "::error::SUSFS aria2 shim could not determine the requested output filename" >&2
+    exit 2
+  fi
+
+  if [[ ! -s "$archive" ]]; then
+    echo "::error::Shared SUSFS archive is missing for ref ${ref}: ${archive}" >&2
+    exit 1
+  fi
+
+  mkdir -p "$dir"
+  cp -f "$archive" "$dir/$out"
+  echo "✅ Reused shared SUSFS archive for ${ref}"
+  exit 0
+fi
+
+shim_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+clean_path=""
+IFS=':' read -ra path_parts <<< "$PATH"
+for part in "${path_parts[@]}"; do
+  [[ -z "$part" || "$part" == "$shim_dir" ]] && continue
+  if [[ -z "$clean_path" ]]; then
+    clean_path="$part"
+  else
+    clean_path+="${clean_path:+:}$part"
+  fi
+done
+
+real_aria2c="$(PATH="$clean_path" command -v aria2c || true)"
+if [[ -z "$real_aria2c" ]]; then
+  echo "::error::aria2c is unavailable outside the SUSFS archive shim" >&2
+  exit 127
+fi
+
+exec "$real_aria2c" "$@"
