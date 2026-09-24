@@ -636,7 +636,7 @@ jobs:
 
             archive="susfs-archives/susfs4ksu-${ref}.tar.gz"
             tmp="${archive}.part"
-            url="https://gitlab.com/simonpunk/susfs4ksu/-/archive/${ref}/susfs4ksu-${ref}.tar.gz"
+            url="https://gitlab.com/api/v4/projects/simonpunk%2Fsusfs4ksu/repository/archive.tar.gz?sha=${ref}&include_lfs_blobs=false"
             ok=0
 
             for attempt in 1 2 3 4 5 6; do
