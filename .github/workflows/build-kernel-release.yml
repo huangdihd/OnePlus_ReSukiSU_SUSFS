@@ -592,13 +592,96 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
+  prepare_susfs:
+    name: Prepare SUSFS archives (download once)
+    needs: set-op-model
+    if: ${{ needs.set-op-model.outputs.active_gki_keys != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download active SUSFS archives once
+        env:
+          ACTIVE_GKI_KEYS: ${{ needs.set-op-model.outputs.active_gki_keys }}
+          SUSFS_HASH_ANDROID12_5_10: ${{ needs.set-op-model.outputs.susfs_hash_android12_5_10 }}
+          SUSFS_HASH_ANDROID13_5_15: ${{ needs.set-op-model.outputs.susfs_hash_android13_5_15 }}
+          SUSFS_HASH_ANDROID14_6_1: ${{ needs.set-op-model.outputs.susfs_hash_android14_6_1 }}
+          SUSFS_HASH_ANDROID15_6_6: ${{ needs.set-op-model.outputs.susfs_hash_android15_6_6 }}
+          SUSFS_HASH_ANDROID16_6_12: ${{ needs.set-op-model.outputs.susfs_hash_android16_6_12 }}
+        run: |
+          set -euo pipefail
+          echo "::group::Download shared SUSFS archives"
+          mkdir -p susfs-archives
+
+          declare -A hashes=(
+            ["android12-5.10"]="$SUSFS_HASH_ANDROID12_5_10"
+            ["android13-5.15"]="$SUSFS_HASH_ANDROID13_5_15"
+            ["android14-6.1"]="$SUSFS_HASH_ANDROID14_6_1"
+            ["android15-6.6"]="$SUSFS_HASH_ANDROID15_6_6"
+            ["android16-6.12"]="$SUSFS_HASH_ANDROID16_6_12"
+          )
+          declare -A seen=()
+
+          IFS=',' read -ra active_keys <<< "$ACTIVE_GKI_KEYS"
+          for key in "${active_keys[@]}"; do
+            ref="${hashes[$key]:-unknown}"
+            if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Invalid resolved SUSFS hash '$ref' for $key"
+              exit 1
+            fi
+
+            if [[ -n "${seen[$ref]:-}" ]]; then
+              echo "ℹ️  $key reuses SUSFS $ref; skipping duplicate download"
+              continue
+            fi
+            seen[$ref]=1
+
+            archive="susfs-archives/susfs4ksu-${ref}.tar.gz"
+            tmp="${archive}.part"
+            url="https://gitlab.com/api/v4/projects/simonpunk%2Fsusfs4ksu/repository/archive.tar.gz?sha=${ref}&include_lfs_blobs=false"
+            ok=0
+
+            for attempt in 1 2 3 4 5 6; do
+              rm -f "$tmp"
+              if curl -LfsS --connect-timeout 30 --max-time 180 \
+                -H "User-Agent: Mozilla/5.0" "$url" -o "$tmp" \
+                && [ -s "$tmp" ] \
+                && tar -tzf "$tmp" >/dev/null 2>&1; then
+                mv "$tmp" "$archive"
+                ok=1
+                echo "✅ Downloaded $key SUSFS $ref"
+                break
+              fi
+
+              echo "::warning::SUSFS download failed for $key (attempt $attempt/6); backing off..."
+              sleep $(( attempt * 5 + RANDOM % 6 ))
+            done
+
+            if [ "$ok" != 1 ]; then
+              rm -f "$tmp"
+              echo "::error::Failed to download SUSFS archive for $key ($ref)"
+              exit 1
+            fi
+          done
+
+          echo "Prepared $(find susfs-archives -maxdepth 1 -name 'susfs4ksu-*.tar.gz' -type f | wc -l) unique SUSFS archive(s)"
+          echo "::endgroup::"
+
+      - name: Upload shared SUSFS archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: susfs-archives
+          path: susfs-archives/*.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
   build:
     name: build (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ matrix.os_version }}, ${{ matrix.ksu_type }})
-    needs: [set-op-model, mirror_toolchain, prepare_ccache]
+    needs: [set-op-model, mirror_toolchain, prepare_ccache, prepare_susfs]
     if: |
       !cancelled() &&
       needs.set-op-model.result == 'success' &&
-      (needs.mirror_toolchain.result == 'success' || needs.mirror_toolchain.result == 'skipped')
+      (needs.mirror_toolchain.result == 'success' || needs.mirror_toolchain.result == 'skipped') &&
+      (needs.prepare_susfs.result == 'success' || needs.prepare_susfs.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -651,6 +734,22 @@ jobs:
           rm -rf ccache-dl
           echo "[DEBUG] Ccache version : $(ccache --version | head -1)"
           echo "::endgroup::"
+
+      - name: Get shared SUSFS archives
+        if: ${{ matrix.susfs }}
+        uses: actions/download-artifact@v4
+        with:
+          name: susfs-archives
+          path: susfs-archives
+
+      - name: Route SUSFS fetches to shared archive
+        if: ${{ matrix.susfs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "$GITHUB_WORKSPACE/.github/scripts/susfs-archive-bin/aria2c"
+          echo "$GITHUB_WORKSPACE/.github/scripts/susfs-archive-bin" >> "$GITHUB_PATH"
+          echo "✅ SUSFS archive shim enabled for this matrix job"
 
       - name: ♻️ Configure ccache (bounded)
         run: |
@@ -900,16 +999,17 @@ jobs:
           merge-multiple: true
           skip-decompress: true
 
-      - name: 🧹 Exclude ccache binary from release staging
+      - name: 🧹 Exclude build helper artifacts from release staging
         run: |
-          # merge-multiple pulls every run artifact (including the shared
-          # ccache-binary) into ./downloaded-artifacts. The ccache binary is a
-          # build-time helper and must never become a release asset, so drop it
-          # before notes generation / asset upload. The ccache download-once
-          # mechanism (prepare_ccache job + ccache-binary artifact) is untouched.
+          # Shared build helpers must never become release assets. With
+          # skip-decompress=true, archived helpers are downloaded as <name>.zip.
           find ./downloaded-artifacts -maxdepth 2 -type f -name ccache -delete
+          find ./downloaded-artifacts -maxdepth 2 -type f -name 'susfs4ksu-*.tar.gz' -delete
+          rm -f ./downloaded-artifacts/ccache-binary.zip
+          rm -f ./downloaded-artifacts/susfs-archives.zip
           rm -rf ./downloaded-artifacts/ccache-binary
-          echo "✅ ccache binary excluded from release staging"
+          rm -rf ./downloaded-artifacts/susfs-archives
+          echo "✅ build helper artifacts excluded from release staging"
 
       - name: 📝 Generate Device List and Final Release Notes
         id: generate-notes
